@@ -109,7 +109,7 @@ public final class AlluxioBlockStoreTest {
 
     @Override
     public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-        long blockSizeBytes, WorkerNetAddress.WorkerRole role) {
+        long blockSizeBytes) {
       if (mWorkerNetAddresses.isEmpty()) {
         return null;
       }
@@ -118,7 +118,7 @@ public final class AlluxioBlockStoreTest {
 
     @Override
     public WorkerNetAddress getWorker(GetWorkerOptions options) {
-      return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize(), options.getRole());
+      return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize());
     }
   }
 
@@ -159,7 +159,7 @@ public final class AlluxioBlockStoreTest {
         .setLocationPolicy(new FileWriteLocationPolicy() {
           @Override
           public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-              long blockSizeBytes, WorkerNetAddress.WorkerRole role) {
+              long blockSizeBytes) {
             throw new RuntimeException("policy threw exception");
           }
         });

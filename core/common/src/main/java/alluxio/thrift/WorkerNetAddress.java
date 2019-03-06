@@ -47,7 +47,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
   private static final org.apache.thrift.protocol.TField WEB_PORT_FIELD_DESC = new org.apache.thrift.protocol.TField("webPort", org.apache.thrift.protocol.TType.I32, (short)4);
   private static final org.apache.thrift.protocol.TField DOMAIN_SOCKET_PATH_FIELD_DESC = new org.apache.thrift.protocol.TField("domainSocketPath", org.apache.thrift.protocol.TType.STRING, (short)5);
   private static final org.apache.thrift.protocol.TField TIERED_IDENTITY_FIELD_DESC = new org.apache.thrift.protocol.TField("tieredIdentity", org.apache.thrift.protocol.TType.STRUCT, (short)6);
-  private static final org.apache.thrift.protocol.TField ROLE_FIELD_DESC = new org.apache.thrift.protocol.TField("role", org.apache.thrift.protocol.TType.I32, (short)7);
 
   private static final Map<Class<? extends IScheme>, SchemeFactory> schemes = new HashMap<Class<? extends IScheme>, SchemeFactory>();
   static {
@@ -61,7 +60,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
   private int webPort; // required
   private String domainSocketPath; // required
   private TieredIdentity tieredIdentity; // required
-  private WorkerRole role; // required
 
   /** The set of fields this struct contains, along with convenience methods for finding and manipulating them. */
   public enum _Fields implements org.apache.thrift.TFieldIdEnum {
@@ -70,12 +68,7 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     DATA_PORT((short)3, "dataPort"),
     WEB_PORT((short)4, "webPort"),
     DOMAIN_SOCKET_PATH((short)5, "domainSocketPath"),
-    TIERED_IDENTITY((short)6, "tieredIdentity"),
-    /**
-     * 
-     * @see WorkerRole
-     */
-    ROLE((short)7, "role");
+    TIERED_IDENTITY((short)6, "tieredIdentity");
 
     private static final Map<String, _Fields> byName = new HashMap<String, _Fields>();
 
@@ -102,8 +95,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
           return DOMAIN_SOCKET_PATH;
         case 6: // TIERED_IDENTITY
           return TIERED_IDENTITY;
-        case 7: // ROLE
-          return ROLE;
         default:
           return null;
       }
@@ -163,8 +154,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
         new org.apache.thrift.meta_data.FieldValueMetaData(org.apache.thrift.protocol.TType.STRING)));
     tmpMap.put(_Fields.TIERED_IDENTITY, new org.apache.thrift.meta_data.FieldMetaData("tieredIdentity", org.apache.thrift.TFieldRequirementType.DEFAULT, 
         new org.apache.thrift.meta_data.StructMetaData(org.apache.thrift.protocol.TType.STRUCT, TieredIdentity.class)));
-    tmpMap.put(_Fields.ROLE, new org.apache.thrift.meta_data.FieldMetaData("role", org.apache.thrift.TFieldRequirementType.DEFAULT, 
-        new org.apache.thrift.meta_data.EnumMetaData(org.apache.thrift.protocol.TType.ENUM, WorkerRole.class)));
     metaDataMap = Collections.unmodifiableMap(tmpMap);
     org.apache.thrift.meta_data.FieldMetaData.addStructMetaDataMap(WorkerNetAddress.class, metaDataMap);
   }
@@ -178,8 +167,7 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     int dataPort,
     int webPort,
     String domainSocketPath,
-    TieredIdentity tieredIdentity,
-    WorkerRole role)
+    TieredIdentity tieredIdentity)
   {
     this();
     this.host = host;
@@ -191,7 +179,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     setWebPortIsSet(true);
     this.domainSocketPath = domainSocketPath;
     this.tieredIdentity = tieredIdentity;
-    this.role = role;
   }
 
   /**
@@ -211,9 +198,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     if (other.isSetTieredIdentity()) {
       this.tieredIdentity = new TieredIdentity(other.tieredIdentity);
     }
-    if (other.isSetRole()) {
-      this.role = other.role;
-    }
   }
 
   public WorkerNetAddress deepCopy() {
@@ -231,7 +215,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     this.webPort = 0;
     this.domainSocketPath = null;
     this.tieredIdentity = null;
-    this.role = null;
   }
 
   public String getHost() {
@@ -375,38 +358,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     }
   }
 
-  /**
-   * 
-   * @see WorkerRole
-   */
-  public WorkerRole getRole() {
-    return this.role;
-  }
-
-  /**
-   * 
-   * @see WorkerRole
-   */
-  public WorkerNetAddress setRole(WorkerRole role) {
-    this.role = role;
-    return this;
-  }
-
-  public void unsetRole() {
-    this.role = null;
-  }
-
-  /** Returns true if field role is set (has been assigned a value) and false otherwise */
-  public boolean isSetRole() {
-    return this.role != null;
-  }
-
-  public void setRoleIsSet(boolean value) {
-    if (!value) {
-      this.role = null;
-    }
-  }
-
   public void setFieldValue(_Fields field, Object value) {
     switch (field) {
     case HOST:
@@ -457,14 +408,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
       }
       break;
 
-    case ROLE:
-      if (value == null) {
-        unsetRole();
-      } else {
-        setRole((WorkerRole)value);
-      }
-      break;
-
     }
   }
 
@@ -487,9 +430,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
 
     case TIERED_IDENTITY:
       return getTieredIdentity();
-
-    case ROLE:
-      return getRole();
 
     }
     throw new IllegalStateException();
@@ -514,8 +454,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
       return isSetDomainSocketPath();
     case TIERED_IDENTITY:
       return isSetTieredIdentity();
-    case ROLE:
-      return isSetRole();
     }
     throw new IllegalStateException();
   }
@@ -587,15 +525,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
         return false;
     }
 
-    boolean this_present_role = true && this.isSetRole();
-    boolean that_present_role = true && that.isSetRole();
-    if (this_present_role || that_present_role) {
-      if (!(this_present_role && that_present_role))
-        return false;
-      if (!this.role.equals(that.role))
-        return false;
-    }
-
     return true;
   }
 
@@ -632,11 +561,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
     list.add(present_tieredIdentity);
     if (present_tieredIdentity)
       list.add(tieredIdentity);
-
-    boolean present_role = true && (isSetRole());
-    list.add(present_role);
-    if (present_role)
-      list.add(role.getValue());
 
     return list.hashCode();
   }
@@ -709,16 +633,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
         return lastComparison;
       }
     }
-    lastComparison = Boolean.valueOf(isSetRole()).compareTo(other.isSetRole());
-    if (lastComparison != 0) {
-      return lastComparison;
-    }
-    if (isSetRole()) {
-      lastComparison = org.apache.thrift.TBaseHelper.compareTo(this.role, other.role);
-      if (lastComparison != 0) {
-        return lastComparison;
-      }
-    }
     return 0;
   }
 
@@ -772,14 +686,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
       sb.append("null");
     } else {
       sb.append(this.tieredIdentity);
-    }
-    first = false;
-    if (!first) sb.append(", ");
-    sb.append("role:");
-    if (this.role == null) {
-      sb.append("null");
-    } else {
-      sb.append(this.role);
     }
     first = false;
     sb.append(")");
@@ -879,14 +785,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
               org.apache.thrift.protocol.TProtocolUtil.skip(iprot, schemeField.type);
             }
             break;
-          case 7: // ROLE
-            if (schemeField.type == org.apache.thrift.protocol.TType.I32) {
-              struct.role = alluxio.thrift.WorkerRole.findByValue(iprot.readI32());
-              struct.setRoleIsSet(true);
-            } else { 
-              org.apache.thrift.protocol.TProtocolUtil.skip(iprot, schemeField.type);
-            }
-            break;
           default:
             org.apache.thrift.protocol.TProtocolUtil.skip(iprot, schemeField.type);
         }
@@ -926,11 +824,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
         struct.tieredIdentity.write(oprot);
         oprot.writeFieldEnd();
       }
-      if (struct.role != null) {
-        oprot.writeFieldBegin(ROLE_FIELD_DESC);
-        oprot.writeI32(struct.role.getValue());
-        oprot.writeFieldEnd();
-      }
       oprot.writeFieldStop();
       oprot.writeStructEnd();
     }
@@ -967,10 +860,7 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
       if (struct.isSetTieredIdentity()) {
         optionals.set(5);
       }
-      if (struct.isSetRole()) {
-        optionals.set(6);
-      }
-      oprot.writeBitSet(optionals, 7);
+      oprot.writeBitSet(optionals, 6);
       if (struct.isSetHost()) {
         oprot.writeString(struct.host);
       }
@@ -989,15 +879,12 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
       if (struct.isSetTieredIdentity()) {
         struct.tieredIdentity.write(oprot);
       }
-      if (struct.isSetRole()) {
-        oprot.writeI32(struct.role.getValue());
-      }
     }
 
     @Override
     public void read(org.apache.thrift.protocol.TProtocol prot, WorkerNetAddress struct) throws org.apache.thrift.TException {
       TTupleProtocol iprot = (TTupleProtocol) prot;
-      BitSet incoming = iprot.readBitSet(7);
+      BitSet incoming = iprot.readBitSet(6);
       if (incoming.get(0)) {
         struct.host = iprot.readString();
         struct.setHostIsSet(true);
@@ -1022,10 +909,6 @@ public class WorkerNetAddress implements org.apache.thrift.TBase<WorkerNetAddres
         struct.tieredIdentity = new TieredIdentity();
         struct.tieredIdentity.read(iprot);
         struct.setTieredIdentityIsSet(true);
-      }
-      if (incoming.get(6)) {
-        struct.role = alluxio.thrift.WorkerRole.findByValue(iprot.readI32());
-        struct.setRoleIsSet(true);
       }
     }
   }

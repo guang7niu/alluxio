@@ -103,9 +103,6 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
   /** The address for the rpc server. */
   private InetSocketAddress mRpcAddress;
 
-  /** Worker role */
-  private WorkerNetAddress.WorkerRole mRole;
-
   /** Worker start time in milliseconds. */
   private long mStartTimeMs;
 
@@ -156,7 +153,6 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
       String rpcHost = ThriftUtils.getThriftSocket(mThriftServerSocket).getInetAddress()
           .getHostAddress();
       mRpcAddress = new InetSocketAddress(rpcHost, rpcPort);
-      mRole = WorkerNetAddress.WorkerRole.valueOf(Configuration.get(PropertyKey.WORKER_ROLE).toUpperCase());
       mThriftServer = createThriftServer();
 
       // Setup Data server
@@ -393,7 +389,6 @@ public final class AlluxioWorkerProcess implements WorkerProcess {
         .setDataPort(getDataLocalPort())
         .setDomainSocketPath(getDataDomainSocketPath())
         .setWebPort(mWebServer.getLocalPort())
-        .setRole(mRole)
         .setTieredIdentity(mTieredIdentitiy);
   }
 

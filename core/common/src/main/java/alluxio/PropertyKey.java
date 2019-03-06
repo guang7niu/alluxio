@@ -15,8 +15,6 @@ import alluxio.exception.ExceptionMessage;
 import alluxio.util.OSUtils;
 import alluxio.util.io.PathUtils;
 import alluxio.wire.Scope;
-import alluxio.wire.WorkerNetAddress;
-
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
 import com.google.common.base.Preconditions;
@@ -1710,12 +1708,6 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.WORKER)
           .build();
-  public static final PropertyKey WORKER_ROLE = new Builder(Name.WORKER_ROLE)
-      .setDescription("The role of Alluxio worker.")
-      .setConsistencyCheckLevel(ConsistencyCheckLevel.IGNORE)
-      .setScope(Scope.WORKER)
-      .setDefaultValue(WorkerNetAddress.WorkerRole.ALL)
-      .build();
   public static final PropertyKey WORKER_HOSTNAME = new Builder(Name.WORKER_HOSTNAME)
       .setDescription("The hostname of Alluxio worker.")
       .setScope(Scope.WORKER)
@@ -3125,13 +3117,6 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.WORKER)
           .build();
-  public static final PropertyKey WORKER_LOCAL_PATH =
-      new Builder(Name.WORKER_LOCAL_PATH)
-          .setDefaultValue("/tmp.non_existed/alluxioworker")
-          .setDescription("Local worker path.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.WORKER)
-          .build();
 
   /**
    * @param fullyQualifiedClassname a fully qualified classname
@@ -3452,7 +3437,6 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.worker.file.persist.rate.limit.enabled";
     public static final String WORKER_FILE_BUFFER_SIZE = "alluxio.worker.file.buffer.size";
     public static final String WORKER_FREE_SPACE_TIMEOUT = "alluxio.worker.free.space.timeout";
-    public static final String WORKER_ROLE = "alluxio.worker.role";
     public static final String WORKER_HOSTNAME = "alluxio.worker.hostname";
     public static final String WORKER_KEYTAB_FILE = "alluxio.worker.keytab.file";
     public static final String WORKER_MEMORY_SIZE = "alluxio.worker.memory.size";

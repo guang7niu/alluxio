@@ -38,7 +38,6 @@ import alluxio.wire.BlockLocation;
 import alluxio.wire.TieredIdentity;
 import alluxio.wire.WorkerInfo;
 import alluxio.wire.WorkerNetAddress;
-import alluxio.wire.WorkerNetAddress.WorkerRole;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -199,17 +198,10 @@ public final class AlluxioBlockStore {
     WorkerNetAddress localWorker = mContext.getLocalWorker();
 
     // Note that, it is possible that the blocks have been written as UFS blocks
-
-    // TODO check why `|| options.getStatus().getPersistenceState().equals("TO_BE_PERSISTED")` is added
-    // if (options.getStatus().isPersisted()
-    //     || options.getStatus().getPersistenceState().equals("TO_BE_PERSISTED")) {
-    if (options.getStatus().isPersisted()) {
+    if (options.getStatus().isPersisted()
+        || options.getStatus().getPersistenceState().equals("TO_BE_PERSISTED")) {
       blockWorkerInfo = getEligibleWorkers();
-      workerPool = blockWorkerInfo
-        .stream()
-        .map(BlockWorkerInfo::getNetAddress)
-        .filter(w -> ! (w.getRole() != null && w.getRole().equals(WorkerNetAddress.WorkerRole.WRITE)))
-        .collect(toSet());
+      workerPool = blockWorkerInfo.stream().map(BlockWorkerInfo::getNetAddress).collect(toSet());
       if (workerPool.isEmpty()) {
         throw new UnavailableException(
             "No Alluxio worker available. Check that your workers are still running");
@@ -266,7 +258,7 @@ public final class AlluxioBlockStore {
       blockWorkerInfo = blockWorkerInfo.stream()
         .filter(workerInfo -> workers.contains(workerInfo.getNetAddress())).collect(toList());
       GetWorkerOptions getWorkerOptions = GetWorkerOptions.defaults().setBlockId(info.getBlockId())
-          .setBlockSize(info.getLength()).setRole(WorkerRole.READ).setBlockWorkerInfos(blockWorkerInfo);
+        .setBlockSize(info.getLength()).setBlockWorkerInfos(blockWorkerInfo);
       dataSource = policy.getWorker(getWorkerOptions);
     }
     if (dataSource == null) {
@@ -345,7 +337,7 @@ public final class AlluxioBlockStore {
     WorkerNetAddress address;
     FileWriteLocationPolicy locationPolicy = Preconditions.checkNotNull(options.getLocationPolicy(),
         PreconditionMessage.FILE_WRITE_LOCATION_POLICY_UNSPECIFIED);
-    address = locationPolicy.getWorkerForNextBlock(getEligibleWorkers(), blockSize, WorkerRole.WRITE);
+    address = locationPolicy.getWorkerForNextBlock(getEligibleWorkers(), blockSize);
     if (address == null) {
       throw new UnavailableException(
           ExceptionMessage.NO_SPACE_FOR_BLOCK_ON_WORKER.getMessage(blockSize));

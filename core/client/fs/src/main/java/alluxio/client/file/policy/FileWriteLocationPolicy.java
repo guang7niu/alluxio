@@ -13,7 +13,6 @@ package alluxio.client.file.policy;
 
 import alluxio.annotation.PublicApi;
 import alluxio.client.block.BlockWorkerInfo;
-import alluxio.client.block.policy.options.GetWorkerOptions;
 import alluxio.client.file.FileOutStream;
 import alluxio.wire.WorkerNetAddress;
 
@@ -43,5 +42,5 @@ public interface FileWriteLocationPolicy {
    * @return the address of the worker to write to, null if no worker can be selected
    */
   WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-      long blockSizeBytes, WorkerNetAddress.WorkerRole role);
+      long blockSizeBytes);
 }

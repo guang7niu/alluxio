@@ -54,7 +54,7 @@ public final class LocalFirstAvoidEvictionPolicy
 
   @Override
   public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-      long blockSizeBytes, WorkerNetAddress.WorkerRole role) {
+      long blockSizeBytes) {
     List<BlockWorkerInfo> allWorkers = Lists.newArrayList(workerInfoList);
     // Prefer workers with enough availability.
     List<BlockWorkerInfo> workers = allWorkers.stream()
@@ -63,12 +63,12 @@ public final class LocalFirstAvoidEvictionPolicy
     if (workers.isEmpty()) {
       workers = allWorkers;
     }
-    return mPolicy.getWorkerForNextBlock(workers, blockSizeBytes, role);
+    return mPolicy.getWorkerForNextBlock(workers, blockSizeBytes);
   }
 
   @Override
   public WorkerNetAddress getWorker(GetWorkerOptions options) {
-    return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize(), options.getRole());
+    return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize());
 
   }
 

@@ -36,7 +36,7 @@ public final class MostAvailableFirstPolicy
 
   @Override
   public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-      long blockSizeBytes, WorkerNetAddress.WorkerRole role) {
+      long blockSizeBytes) {
     long mostAvailableBytes = -1;
     WorkerNetAddress result = null;
     for (BlockWorkerInfo workerInfo : workerInfoList) {
@@ -50,7 +50,7 @@ public final class MostAvailableFirstPolicy
 
   @Override
   public WorkerNetAddress getWorker(GetWorkerOptions options) {
-    return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize(), options.getRole());
+    return getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize());
   }
 
   @Override

@@ -57,7 +57,7 @@ public final class RoundRobinPolicy implements FileWriteLocationPolicy, BlockLoc
   @Override
   @Nullable
   public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList,
-      long blockSizeBytes, WorkerNetAddress.WorkerRole role) {
+      long blockSizeBytes) {
     if (!mInitialized) {
       mWorkerInfoList = Lists.newArrayList(workerInfoList);
       Collections.shuffle(mWorkerInfoList);
@@ -84,7 +84,7 @@ public final class RoundRobinPolicy implements FileWriteLocationPolicy, BlockLoc
     if (address != null) {
       return address;
     }
-    address = getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize(), options.getRole());
+    address = getWorkerForNextBlock(options.getBlockWorkerInfos(), options.getBlockSize());
     mBlockLocationCache.put(options.getBlockId(), address);
     return address;
   }
