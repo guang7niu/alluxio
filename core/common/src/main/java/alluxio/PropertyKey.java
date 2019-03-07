@@ -3117,6 +3117,13 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.WORKER)
           .build();
+  public static final PropertyKey WORKER_LOCAL_PATH =
+      new Builder(Name.WORKER_LOCAL_PATH)
+          .setDefaultValue("/tmp.non_existed/alluxioworker")
+          .setDescription("Local worker path.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.WORKER)
+          .build();
 
   /**
    * @param fullyQualifiedClassname a fully qualified classname
