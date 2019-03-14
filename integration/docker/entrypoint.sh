@@ -53,28 +53,27 @@ alluxio_env_vars=(
   ALLUXIO_RAM_FOLDER
   ALLUXIO_USER_JAVA_OPTS
   ALLUXIO_WORKER_JAVA_OPTS
+  ALLUXIO_JOB_MASTER_JAVA_OPTS
+  ALLUXIO_JOB_WORKER_JAVA_OPTS
 )
 
-compgen -v | while read key; do
-  value=${!key}
+for keyvaluepair in $(env); do
+  # split around the "="
+  key=$(echo ${keyvaluepair} | cut -d= -f1)
+  value=$(echo ${keyvaluepair} | cut -d= -f2-)
   if [[ "${alluxio_env_vars[*]}" =~ "${key}" ]]; then
-    # wrap string value with "" to get rid of values with spaces/# .eg charactors
-    if [ "$value" -eq "$value" ] 2>/dev/null; then
-      echo "export ${key}=${value}" >> conf/alluxio-env.sh
-    elif [[ "$value" == "true" || "$value" == "false" ]]; then
-      echo "export ${key}=${value}" >> conf/alluxio-env.sh
-    else
-      echo "export ${key}=\"${value}\"" >> conf/alluxio-env.sh
-    fi
-  elif [[ ${key} == ALLUXIO_* ]]; then
+    echo "export ${key}=${value}" >> conf/alluxio-env.sh
+  else
     # check if property name is valid
-    echo "get env config: ${key}=${value}"
     if confkey=$(bin/alluxio runClass alluxio.cli.GetConfKey ${key} 2> /dev/null); then
-      echo "set config: ${confkey}=${value}"
       echo "${confkey}=${value}" >> conf/alluxio-site.properties
     fi
   fi
 done
+
+if [ "$ENABLE_FUSE" = true ]; then
+  integration/fuse/bin/alluxio-fuse mount /alluxio-fuse /
+fi
 
 case ${service,,} in
   master)
@@ -85,7 +84,9 @@ case ${service,,} in
     if [[ ${options} != ${NO_FORMAT} ]]; then
       bin/alluxio formatMaster
     fi
-    integration/docker/bin/alluxio-master.sh
+    integration/docker/bin/alluxio-job-master.sh &
+    integration/docker/bin/alluxio-master.sh &
+    wait -n
     ;;
   worker)
     if [[ -n ${options} && ${options} != ${NO_FORMAT} ]]; then
@@ -95,7 +96,9 @@ case ${service,,} in
     if [[ ${options} != ${NO_FORMAT} ]]; then
       bin/alluxio formatWorker
     fi
-    integration/docker/bin/alluxio-worker.sh
+    integration/docker/bin/alluxio-job-worker.sh &
+    integration/docker/bin/alluxio-worker.sh &
+    wait -n
     ;;
   proxy)
     integration/docker/bin/alluxio-proxy.sh
