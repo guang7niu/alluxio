@@ -13,6 +13,7 @@ package alluxio.client.block;
 
 import alluxio.AbstractMasterClient;
 import alluxio.Constants;
+import alluxio.MetaCache;
 import alluxio.client.block.options.GetWorkerReportOptions;
 import alluxio.grpc.BlockMasterClientServiceGrpc;
 import alluxio.grpc.GetBlockInfoPRequest;
@@ -75,6 +76,10 @@ public final class RetryHandlingBlockMasterClient extends AbstractMasterClient
 
   @Override
   public List<WorkerInfo> getWorkerInfoList() throws IOException {
+    // SM
+    List<WorkerInfo> cached = MetaCache.getWorkerInfoList();
+    if (cached != null && cached.size() > 0) return cached;
+
     return retryRPC(() -> {
       List<WorkerInfo> result = new ArrayList<>();
       for (alluxio.grpc.WorkerInfo workerInfo : mClient
@@ -82,6 +87,7 @@ public final class RetryHandlingBlockMasterClient extends AbstractMasterClient
           .getWorkerInfosList()) {
         result.add(GrpcUtils.fromProto(workerInfo));
       }
+      MetaCache.setWorkerInfoList(result);  // SM
       return result;
     });
   }
@@ -106,11 +112,16 @@ public final class RetryHandlingBlockMasterClient extends AbstractMasterClient
    * @return the {@link BlockInfo}
    */
   public BlockInfo getBlockInfo(final long blockId) throws IOException {
-    return retryRPC(() -> {
+    // SM
+    BlockInfo bInfo = MetaCache.getBlockInfo(blockId);
+    if (bInfo != null && bInfo.getLocations() != null && bInfo.getLocations().size() > 0) return bInfo;
+    bInfo = retryRPC(() -> {
       return GrpcUtils.fromProto(
           mClient.getBlockInfo(GetBlockInfoPRequest.newBuilder().setBlockId(blockId).build())
               .getBlockInfo());
     });
+    MetaCache.setBlockInfo(blockId, bInfo);
+    return bInfo;
   }
 
   @Override

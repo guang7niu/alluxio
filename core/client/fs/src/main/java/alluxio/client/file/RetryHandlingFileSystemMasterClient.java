@@ -13,6 +13,7 @@ package alluxio.client.file;
 
 import alluxio.AbstractMasterClient;
 import alluxio.AlluxioURI;
+import alluxio.MetaCache;
 import alluxio.Constants;
 import alluxio.exception.status.AlluxioStatusException;
 import alluxio.grpc.CheckConsistencyPOptions;
@@ -169,10 +170,14 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
   @Override
   public URIStatus getStatus(final AlluxioURI path, final GetStatusPOptions options)
       throws AlluxioStatusException {
-    return retryRPC(() -> new URIStatus(GrpcUtils
+    URIStatus s = MetaCache.getStatus(path.getPath());  // SM
+    if (s != null) return s;
+    s = retryRPC(() -> new URIStatus(GrpcUtils
         .fromProto(mClient.getStatus(GetStatusPRequest.newBuilder().setPath(path.getPath())
             .setOptions(options).build()).getFileInfo())),
         "GetStatus");
+    MetaCache.setStatus(path.getPath(), s);
+    return s;
   }
 
   @Override

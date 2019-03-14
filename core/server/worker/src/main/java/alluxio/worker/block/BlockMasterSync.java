@@ -92,8 +92,9 @@ public final class BlockMasterSync implements HeartbeatExecutor {
         .getMs(PropertyKey.WORKER_BLOCK_HEARTBEAT_TIMEOUT_MS);
     mAsyncBlockRemover = new AsyncBlockRemover(mBlockWorker);
 
+    mLastSuccessfulHeartbeatMs = System.currentTimeMillis();  // SM
     registerWithMaster();
-    mLastSuccessfulHeartbeatMs = System.currentTimeMillis();
+    //mLastSuccessfulHeartbeatMs = System.currentTimeMillis();  // SM
   }
 
   /**

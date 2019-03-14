@@ -15,6 +15,7 @@ import static java.util.stream.Collectors.toList;
 import static java.util.stream.Collectors.toSet;
 
 import alluxio.Constants;
+import alluxio.MetaCache;
 import alluxio.conf.PropertyKey;
 import alluxio.client.WriteType;
 import alluxio.client.block.policy.BlockLocationPolicy;
@@ -40,6 +41,7 @@ import alluxio.util.TieredIdentityUtils;
 import alluxio.wire.BlockInfo;
 import alluxio.wire.BlockLocation;
 import alluxio.wire.TieredIdentity;
+import alluxio.wire.WorkerInfo;
 import alluxio.wire.WorkerNetAddress;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -49,11 +51,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.Objects;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -72,6 +77,14 @@ public final class AlluxioBlockStore {
   private List<BlockWorkerInfo> mWorkerInfoList = null;
   /** The policy to refresh workers list. */
   private final RefreshPolicy mWorkerRefreshPolicy;
+
+  private static List<String> mWriteHosts = null;   // SM
+  {
+      String hosts = System.getenv("QINIU_WRITER_HOSTS");
+      if (hosts != null) mWriteHosts = Arrays.asList(hosts.split("\\s*,\\s*"));
+      if (mWriteHosts == null) mWriteHosts = new ArrayList<String>();
+  }
+
 
   /**
    * Creates an Alluxio block store with default local hostname.
@@ -163,14 +176,23 @@ public final class AlluxioBlockStore {
       Map<WorkerNetAddress, Long> failedWorkers) throws IOException {
     // Get the latest block info from master
     BlockInfo info;
+    Set<WorkerNetAddress> cachedWorkers;    // SM
     try (CloseableResource<BlockMasterClient> masterClientResource =
              mContext.acquireBlockMasterClientResource()) {
       info = masterClientResource.get().getBlockInfo(blockId);
+      cachedWorkers = masterClientResource.get().getWorkerInfoList().stream().map(WorkerInfo::getAddress).collect(toSet());
     }
+
+    // SM
     List<BlockLocation> locations = info.getLocations();
+    Set<WorkerNetAddress> blockWorkers = locations.stream().map(BlockLocation::getWorkerAddress).collect(toSet());
+    if (!cachedWorkers.containsAll(blockWorkers)) MetaCache.invalidateWorkerInfoList();
+
     List<BlockWorkerInfo> blockWorkerInfo = Collections.EMPTY_LIST;
     // Initial target workers to read the block given the block locations.
     Set<WorkerNetAddress> workerPool;
+    WorkerNetAddress localWorker = mContext.getLocalWorker();
+
     // Note that, it is possible that the blocks have been written as UFS blocks
     if (options.getStatus().isPersisted()
         || options.getStatus().getPersistenceState().equals("TO_BE_PERSISTED")) {
@@ -180,12 +202,20 @@ public final class AlluxioBlockStore {
         throw new UnavailableException(
             "No Alluxio worker available. Check that your workers are still running");
       }
+      // SM
+      Set<WorkerNetAddress> subPool = workerPool.stream()
+        .filter(w -> blockWorkers.contains(w) || Objects.equals(w, localWorker) ||
+            (!mWriteHosts.contains(w.getHost() + ":" + w.getDataPort())
+             && w.getWebPort() < MetaCache.LOCAL_WORKER_PORT_MIN))
+        .collect(toSet());
+      if (!failedWorkers.keySet().containsAll(subPool)) workerPool = subPool;
     } else {
       workerPool = locations.stream().map(BlockLocation::getWorkerAddress).collect(toSet());
-      if (workerPool.isEmpty()) {
-        throw new NotFoundException(
-            ExceptionMessage.BLOCK_UNAVAILABLE.getMessage(info.getBlockId()));
-      }
+    }
+    if (workerPool.isEmpty()) {
+      // MetaCache.invalidateBlockInfoCache(blockId); // SM
+      throw new NotFoundException(
+          ExceptionMessage.BLOCK_UNAVAILABLE.getMessage(info.getBlockId()));
     }
     // Workers to read the block, after considering failed workers.
     Set<WorkerNetAddress> workers = handleFailedWorkers(workerPool, failedWorkers);
@@ -213,9 +243,12 @@ public final class AlluxioBlockStore {
           dataSourceType = BlockInStreamSource.REMOTE;
         }
       }
+    } else {  // SM
+        MetaCache.invalidateBlockInfoCache(blockId);
     }
     // Can't get data from Alluxio, get it from the UFS instead
     if (dataSource == null) {
+      MetaCache.invalidateBlockInfoCache(blockId);  // SM
       dataSourceType = BlockInStreamSource.UFS;
       BlockLocationPolicy policy =
           Preconditions.checkNotNull(options.getUfsReadLocationPolicy(),

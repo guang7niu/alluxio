@@ -1,23 +1,38 @@
-#
-# The Alluxio Open Foundation licenses this work under the Apache License, version 2.0
-# (the "License"). You may not use this work except in compliance with the License, which is
-# available at www.apache.org/licenses/LICENSE-2.0
-#
-# This software is distributed on an "AS IS" basis, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-# either express or implied, as more fully set forth in the License.
-#
-# See the NOTICE file distributed with this work for information regarding copyright ownership.
-#
+FROM ubuntu:16.04
 
-FROM openjdk:8-jdk-alpine
+# ===============================================================
+# apt install
+# ---------------------------------------------------------------
+RUN sed -i s/archive.ubuntu.com/mirrors.aliyun.com/g /etc/apt/sources.list && \
+    sed -i s/security.ubuntu.com/mirrors.aliyun.com/g /etc/apt/sources.list
 
-ARG ALLUXIO_TARBALL=http://downloads.alluxio.org/downloads/files/2.0.0-preview/alluxio-2.0.0-preview-RC2-bin.tar.gz
+RUN apt-get -o Acquire::https::No-Cache=True -o Acquire::http::No-Cache=True update && \
+	apt-get install -y --no-install-recommends software-properties-common && \
+	apt-get -o Acquire::https::No-Cache=True -o Acquire::http::No-Cache=True update && \
+	apt-get install -y --no-install-recommends \
+	less vim curl tree \
+	net-tools tcpdump lsof iptraf \
+	python-dev python-pip \
+	openjdk-8-jdk openjdk-8-jre-headless libfuse-dev && \
+	apt-get clean && \
+	rm -rf /var/lib/apt/lists/*
 
-RUN apk add --update bash && \
-    rm -rf /var/cache/apk/*
+# ===============================================================
+# pip install
+# ---------------------------------------------------------------
+RUN PIP_INSTALL="pip --no-cache-dir install --upgrade --index-url https://pypi.doubanio.com/simple" && \
+		$PIP_INSTALL setuptools && $PIP_INSTALL six requests && $PIP_INSTALL alluxio
 
-ADD ${ALLUXIO_TARBALL} /opt/
+# ===============================================================
+# java env
+# ---------------------------------------------------------------
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64
 
+# ===============================================================
+# add alluxio package
+# ---------------------------------------------------------------
+ARG ALLUXIO_VERSION=2.0.0-preview-RC2
+ADD alluxio-${ALLUXIO_VERSION}.tar.gz /opt
 # if the tarball was remote, it needs to be untarred
 # use ln -s instead of mv to avoid issues with Centos (see https://github.com/moby/moby/issues/27358)
 RUN cd /opt && \
@@ -26,5 +41,5 @@ RUN cd /opt && \
 
 COPY conf /opt/alluxio/conf/
 COPY entrypoint.sh /
-
+ENV TERM=xterm
 ENTRYPOINT ["/entrypoint.sh"]

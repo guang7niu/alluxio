@@ -82,6 +82,18 @@ public class AsyncCacheRequestManager {
     ASYNC_CACHE_REQUESTS.inc();
     long blockId = request.getBlockId();
     long blockLength = request.getLength();
+
+    //SM
+    if (blockLength <= 0) {
+      LOG.info("!!! try to purge {}", blockId);
+      mBlockWorker.evictBlock(blockId);
+      return;
+    }
+    if (mPendingRequests.size() >= 200) {
+      LOG.info("!!! too many asyn cach requests pending");
+      return;
+    }
+
     if (mPendingRequests.putIfAbsent(blockId, request) != null) {
       // This block is already planned.
       ASYNC_CACHE_DUPLICATE_REQUESTS.inc();

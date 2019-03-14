@@ -11,6 +11,7 @@
 
 package alluxio.client.file;
 
+import alluxio.MetaCache;
 import alluxio.AlluxioURI;
 import alluxio.Constants;
 import alluxio.conf.PropertyKey;
@@ -18,6 +19,11 @@ import alluxio.exception.AlluxioException;
 import alluxio.exception.FileDoesNotExistException;
 import alluxio.util.CommonUtils;
 import alluxio.util.WaitForOptions;
+import alluxio.conf.AlluxioConfiguration;
+import alluxio.grpc.CheckConsistencyPOptions;
+import alluxio.conf.InstancedConfiguration;
+import alluxio.util.ConfigurationUtils;
+import alluxio.grpc.CheckConsistencyPOptions;
 
 import com.google.common.base.Throwables;
 import org.slf4j.Logger;
@@ -26,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.List;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -35,6 +42,7 @@ import javax.annotation.concurrent.ThreadSafe;
 @ThreadSafe
 public final class FileSystemUtils {
   private static final Logger LOG = LoggerFactory.getLogger(FileSystemUtils.class);
+  private static AlluxioConfiguration conf = new InstancedConfiguration(ConfigurationUtils.defaults()); // SM
 
   // prevent instantiation
   private FileSystemUtils() {}
@@ -153,6 +161,7 @@ public final class FileSystemUtils {
     fs.persist(uri);
     CommonUtils.waitFor(String.format("%s to be persisted", uri) , () -> {
       try {
+        MetaCache.invalidate(uri.getPath());    // SM
         return fs.getStatus(uri).isPersisted();
       } catch (Exception e) {
         Throwables.throwIfUnchecked(e);

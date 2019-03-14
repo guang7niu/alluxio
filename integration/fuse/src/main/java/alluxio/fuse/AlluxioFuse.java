@@ -65,7 +65,8 @@ public final class AlluxioFuse {
     // Force direct_io in FUSE: writes and reads bypass the kernel page
     // cache and go directly to alluxio. This avoids extra memory copies
     // in the write path.
-    fuseOpts.add("-odirect_io");
+    //fuseOpts.add("-odirect_io");
+    fuseOpts.add("-osync_read");  // SM
 
     try {
       fs.mount(Paths.get(opts.getMountPoint()), true, opts.isDebug(),

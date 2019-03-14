@@ -33,7 +33,7 @@ import javax.annotation.concurrent.NotThreadSafe;
  * for every read/write call, which happen quite often.
  */
 @NotThreadSafe
-final class OpenFileEntry implements Closeable {
+public class OpenFileEntry implements Closeable {   // SM
   private final long mId;
   private final FileInStream mIn;
   private final FileOutStream mOut;

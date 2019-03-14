@@ -219,6 +219,14 @@ public class InodeTree implements JournalEntryIterable, JournalEntryReplayable {
     mMountTable = mountTable;
   }
 
+  public Iterator<MutableInode<?>> iterator() {   // SM
+    return mInodeStore.allInodes().iterator();
+  }
+
+  public Inode getInode(long id) {  // SM
+    return mInodeStore.get(id).get();
+  }
+
   /**
    * Initializes the root of the inode tree.
    *

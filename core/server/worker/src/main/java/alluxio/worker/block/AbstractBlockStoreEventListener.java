@@ -45,4 +45,8 @@ public abstract class AbstractBlockStoreEventListener implements BlockStoreEvent
 
   @Override
   public void onBlockLost(long blockId) {}
+
+  @Override
+  public void onEvictBlockByWorker(long sessionId, long blockId) {} // SM
+
 }

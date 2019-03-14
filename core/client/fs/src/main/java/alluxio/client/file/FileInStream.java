@@ -13,6 +13,9 @@ package alluxio.client.file;
 
 import alluxio.conf.AlluxioConfiguration;
 import alluxio.conf.PropertyKey;
+import alluxio.MetaCache;
+import alluxio.AlluxioURI;
+import alluxio.grpc.FreePOptions;
 import alluxio.Seekable;
 import alluxio.annotation.PublicApi;
 import alluxio.client.BoundedStream;
@@ -145,6 +148,21 @@ public class FileInStream extends InputStream implements BoundedStream, Position
     return read(b, 0, b.length);
   }
 
+  private void freeCache() { // SM
+    FileSystemMasterClient masterClient = mContext.acquireMasterClient();
+    AlluxioURI uri = MetaCache.getURI(mStatus.getPath());
+    LOG.warn("free alluxio cache because of inconsistent state {}", uri);
+    if (uri != null) {
+      try {
+        masterClient.free(uri, FreePOptions.getDefaultInstance());
+      } catch (Exception e) {
+        LOG.warn("fail to free {}: {}", uri, e.getMessage());
+      }
+    }
+    mContext.releaseMasterClient(masterClient);
+    MetaCache.invalidate(mStatus.getPath());
+  }
+
   @Override
   public int read(byte[] b, int off, int len) throws IOException {
     Preconditions.checkArgument(b != null, PreconditionMessage.ERR_READ_BUFFER_NULL);
@@ -178,6 +196,14 @@ public class FileInStream extends InputStream implements BoundedStream, Position
           handleRetryableException(mBlockInStream, e);
           mBlockInStream = null;
         }
+      } catch (IllegalStateException e) { // SM
+        freeCache();
+        lastException = new IOException(e.getMessage());
+        if (mBlockInStream != null) {
+          handleRetryableException(mBlockInStream, lastException);
+          mBlockInStream = null;
+        }
+        break;  // let client side fail this time
       }
     }
     if (lastException != null) {
@@ -371,6 +397,12 @@ public class FileInStream extends InputStream implements BoundedStream, Position
     WorkerNetAddress workerAddress = stream.getAddress();
     LOG.warn("Failed to read block {} from worker {}, will retry: {}",
         stream.getId(), workerAddress, e.getMessage());
+
+    // SM - block may be evicted or wrong
+    MetaCache.invalidateBlockInfoCache(stream.getId());
+    MetaCache.invalidate(mStatus.getPath());
+    MetaCache.invalidateWorkerInfoList();
+
     try {
       stream.close();
     } catch (Exception ex) {

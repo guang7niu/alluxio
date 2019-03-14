@@ -47,7 +47,8 @@ public final class AlluxioFuseUtils {
    * @return uid
    */
   public static long getUid(String userName) {
-    return getIdInfo("-u", userName);
+    return 0; // SM
+    //return getIdInfo("-u", userName);
   }
 
   /**
@@ -57,7 +58,8 @@ public final class AlluxioFuseUtils {
    * @return gid
    */
   public static long getGid(String userName) {
-    return getIdInfo("-g", userName);
+    return 0; // SM
+    //return getIdInfo("-g", userName);
   }
 
   /**

@@ -105,7 +105,8 @@ public class BlockInStream extends InputStream implements BoundedStream, Seekabl
 
     // Construct the partial read request
     ReadRequest.Builder builder =
-        ReadRequest.newBuilder().setBlockId(blockId).setPromote(readType.isPromote());
+        ReadRequest.newBuilder().setBlockId(blockId).setPromote(
+            readType.isPromote() && status.isPersisted());  // SM
     // Add UFS fallback options
     builder.setOpenUfsBlockOptions(options.getOpenUfsBlockOptions(blockId));
     AlluxioConfiguration alluxioConf = context.getConf();

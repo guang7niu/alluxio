@@ -25,6 +25,7 @@ public class SetAttributeContext extends OperationContext<SetAttributePOptions.B
 
   private long mOperationTimeMs;
   private String mUfsFingerprint;
+  private long mAccessTimeMs;   // not persisted yet
 
   /**
    * Creates context with given option data.
@@ -35,6 +36,7 @@ public class SetAttributeContext extends OperationContext<SetAttributePOptions.B
     super(optionsBuilder);
     mOperationTimeMs = System.currentTimeMillis();
     mUfsFingerprint = Constants.INVALID_UFS_FINGERPRINT;
+    mAccessTimeMs = System.currentTimeMillis();
   }
 
   /**
@@ -73,6 +75,10 @@ public class SetAttributeContext extends OperationContext<SetAttributePOptions.B
     return mOperationTimeMs;
   }
 
+  public long getAccessTimeMs() {
+    return mAccessTimeMs;
+  }
+
   /**
    * Sets operation time.
    *
@@ -89,6 +95,11 @@ public class SetAttributeContext extends OperationContext<SetAttributePOptions.B
    */
   public String getUfsFingerprint() {
     return mUfsFingerprint;
+  }
+
+  public SetAttributeContext setAccessTimeMs(long accessTimeMs) {
+    mAccessTimeMs = accessTimeMs;
+    return this;
   }
 
   /**

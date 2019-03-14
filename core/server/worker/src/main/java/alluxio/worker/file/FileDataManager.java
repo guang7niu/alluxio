@@ -28,8 +28,10 @@ import alluxio.underfs.options.CreateOptions;
 import alluxio.util.io.BufferUtils;
 import alluxio.wire.FileInfo;
 import alluxio.worker.block.BlockWorker;
+import alluxio.worker.block.RemoteBlockReader;
 import alluxio.worker.block.io.BlockReader;
 import alluxio.worker.block.meta.BlockMeta;
+import alluxio.client.file.FileSystemContext;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -39,6 +41,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
@@ -51,6 +54,11 @@ import java.util.function.Supplier;
 
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.NotThreadSafe;
+
+import alluxio.wire.FileBlockInfo;
+import alluxio.wire.BlockInfo;
+import alluxio.wire.BlockLocation;
+import alluxio.proto.dataserver.Protocol;
 
 /**
  * Responsible for storing files into under file system.
@@ -80,6 +88,9 @@ public final class FileDataManager {
   /** Factory for creating filesystems. */
   private final Supplier<FileSystem> mFileSystemFactory;
   private final ChannelCopier mChannelCopier;
+
+  private final FileSystemContext mFsContext =
+      FileSystemContext.create(ServerConfiguration.global());   // SM
 
   interface ChannelCopier {
     /**
@@ -201,6 +212,31 @@ public final class FileDataManager {
     }
   }
 
+  // SM
+  private Map<Long, BlockInfo> remoteBlocksMap(long fileId) throws IOException {
+    Map<Long, BlockInfo> rm = new HashMap();
+    FileInfo fileInfo = mBlockWorker.getFileInfo(fileId);
+    if (fileInfo == null) return rm;
+
+    long wid = mBlockWorker.getWorkerId().get();
+    for (FileBlockInfo fbInfo: fileInfo.getFileBlockInfos()) {
+        BlockInfo bInfo = fbInfo.getBlockInfo();
+        if (bInfo == null) continue;
+        boolean found = false;
+        for (BlockLocation loc: bInfo.getLocations()) {
+          if (loc.getWorkerId() == wid) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          rm.put(bInfo.getBlockId(), bInfo);
+        }
+    }
+
+    return rm;
+  }
+
   /**
    * Locks all the blocks of a given file Id.
    *
@@ -271,26 +307,42 @@ public final class FileDataManager {
           .setOwner(fileInfo.getOwner()).setGroup(fileInfo.getGroup())
           .setMode(new Mode((short) fileInfo.getMode())));
       final WritableByteChannel outputChannel = Channels.newChannel(outputStream);
+      Map<Long, BlockInfo> remoteMap = remoteBlocksMap(fileId);
       List<Throwable> errors = new ArrayList<>();
       try {
         for (long blockId : blockIds) {
           long lockId = blockIdToLockId.get(blockId);
 
-          if (ServerConfiguration.getBoolean(PropertyKey.WORKER_FILE_PERSIST_RATE_LIMIT_ENABLED)) {
+          if (ServerConfiguration.getBoolean(PropertyKey.WORKER_FILE_PERSIST_RATE_LIMIT_ENABLED)
+              && remoteMap.get(blockId) == null) {  // SM only local block
             BlockMeta blockMeta =
                 mBlockWorker.getBlockMeta(Sessions.CHECKPOINT_SESSION_ID, blockId, lockId);
             mPersistenceRateLimiter.acquire((int) blockMeta.getBlockSize());
           }
 
           // obtain block reader
-          BlockReader reader =
-              mBlockWorker.readBlockRemote(Sessions.CHECKPOINT_SESSION_ID, blockId, lockId);
+          // SM
+          BlockInfo bInfo = remoteMap.get(blockId);
+          if (bInfo != null && (bInfo.getLocations() == null || bInfo.getLocations().size() == 0
+                || bInfo.getLocations().get(0).getWorkerAddress() == null
+                || bInfo.getLocations().get(0).getWorkerAddress().getHost() == null
+                || bInfo.getLocations().get(0).getWorkerAddress().getHost().equals(""))) {
+            throw new BlockDoesNotExistException("!!!=== block " + blockId + " does not exist. bInfo:" + bInfo);
+          }
+          BlockReader reader = (bInfo != null)  // qiniu PMW
+            ? new RemoteBlockReader(mFsContext, blockId, bInfo.getLength(), 
+                new InetSocketAddress(
+                  bInfo.getLocations().get(0).getWorkerAddress().getHost(), 
+                  bInfo.getLocations().get(0).getWorkerAddress().getDataPort()),
+                Protocol.OpenUfsBlockOptions.getDefaultInstance())
+            : mBlockWorker.readBlockRemote(Sessions.CHECKPOINT_SESSION_ID, blockId, lockId);
 
           // write content out
           ReadableByteChannel inputChannel = reader.getChannel();
           mChannelCopier.copy(inputChannel, outputChannel);
           reader.close();
         }
+        LOG.info("=== Persit {}({}):{} ", fileInfo.getPath(), fileId, blockIds);  // SM
       } catch (BlockDoesNotExistException | InvalidWorkerStateException e) {
         errors.add(e);
       } finally {

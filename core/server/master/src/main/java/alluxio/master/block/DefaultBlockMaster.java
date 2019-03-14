@@ -11,6 +11,7 @@
 
 package alluxio.master.block;
 
+import alluxio.MetaCache;
 import alluxio.Constants;
 import alluxio.MasterStorageTierAssoc;
 import alluxio.Server;
@@ -90,6 +91,8 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.locks.Lock;
 import java.util.function.BiConsumer;
@@ -835,6 +838,30 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
       // Technically, 'worker' should be confirmed to still be in the data structure. Lost worker
       // detection can remove it. However, we are intentionally ignoring this race, since the worker
       // will just re-register regardless.
+
+      // SM don't want to change thrift (see its warning), so use '0' to delimit the
+      // to_be_remove and already_removed block ids
+      Set<Long> evictingBlocks = new HashSet<Long>();
+      for (int i = 0; i < removedBlockIds.size(); i++) {
+        if (removedBlockIds.get(i) == 0) {
+          for (int j = 0; j < i; j++) {
+            long blockId = removedBlockIds.get(0);
+            evictingBlocks.add(blockId);
+            removedBlockIds.remove(0);
+          }
+          removedBlockIds.remove(0);
+          break;
+        }
+      }
+      /** // SM 
+       * we now add to queue for workerId without blocks, but may move to another worker queue later
+       * sicne we can't get file info in the block context.
+       * we will let the worker with first block to handle persist to avoid duplication.
+       */
+      for (Long id: evictingBlocks) {
+        MetaCache.addEvictBlock(MetaCache.EVICT_EVICT, workerId, id);
+      }
+
       processWorkerRemovedBlocks(worker, removedBlockIds);
       processWorkerAddedBlocks(worker, addedBlocksOnTiers);
       processWorkerMetrics(worker.getWorkerAddress().getHost(), metrics);
@@ -846,6 +873,13 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
       worker.updateLastUpdatedTimeMs();
 
       List<Long> toRemoveBlocks = worker.getToRemoveBlocks();
+      Set<Long> s = MetaCache.getEvictBlock(MetaCache.EVICT_FREE, workerId);  // SM
+      if (!s.isEmpty()) {
+        LOG.debug("!!! EVICT free {}", s);
+        toRemoveBlocks.addAll(s);
+        s.clear();
+      }
+
       if (toRemoveBlocks.isEmpty()) {
         return Command.newBuilder().setCommandType(CommandType.Nothing).build();
       }

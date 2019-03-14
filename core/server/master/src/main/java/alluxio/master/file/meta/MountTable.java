@@ -12,6 +12,7 @@
 package alluxio.master.file.meta;
 
 import alluxio.AlluxioURI;
+import alluxio.conf.PropertyKey;
 import alluxio.exception.AccessControlException;
 import alluxio.exception.ExceptionMessage;
 import alluxio.exception.FileAlreadyExistsException;
@@ -134,7 +135,7 @@ public final class MountTable implements JournalEntryIterable, JournalEntryRepla
         }
 
         AddMountPointEntry addMountPoint =
-            AddMountPointEntry.newBuilder().setAlluxioPath(alluxioPath)
+            AddMountPointEntry.newBuilder().setAlluxioPath(alluxioPath).setMountId(info.getMountId())   // SM
                 .setMountId(info.getMountId()).setUfsPath(info.getUfsUri().toString())
                 .setReadOnly(info.getOptions().getReadOnly()).addAllProperties(protoProperties)
                 .setShared(info.getOptions().getShared()).build();
@@ -173,21 +174,36 @@ public final class MountTable implements JournalEntryIterable, JournalEntryRepla
       // Make sure that the ufs path we're trying to mount is not a prefix
       // or suffix of any existing mount path.
       for (Map.Entry<String, MountInfo> entry : mState.getMountTable().entrySet()) {
+        String mountedAlluxioPath = entry.getKey();
         AlluxioURI mountedUfsUri = entry.getValue().getUfsUri();
+        // SM
+        MountPOptions mos = entry.getValue().getOptions();
+        boolean isAva = alluxioPath.matches("/ava/qn-bucket/[0-9]{10}/.+");
+        String oldUid = mos.getProperties().get(PropertyKey.Name.OSS_USER_ID);
+        String newUid = options.getProperties().get(PropertyKey.Name.OSS_USER_ID);
+        boolean sameUid = isAva && newUid != null && oldUid != null && newUid.equals(oldUid);
+        // workaround bad entries in journal
+        sameUid = sameUid || (isAva && oldUid == null && newUid != null);
+        if (!mountedAlluxioPath.equals(ROOT)
+            && PathUtils.hasPrefix(alluxioPath, mountedAlluxioPath)) {
+          throw new InvalidPathException(ExceptionMessage.MOUNT_POINT_PREFIX_OF_ANOTHER.getMessage(
+              mountedAlluxioPath, alluxioPath));
+        }
         if ((ufsUri.getScheme() == null || ufsUri.getScheme().equals(mountedUfsUri.getScheme()))
             && (ufsUri.getAuthority().toString().equals(mountedUfsUri.getAuthority().toString()))) {
           String ufsPath = ufsUri.getPath().isEmpty() ? "/" : ufsUri.getPath();
           String mountedUfsPath = mountedUfsUri.getPath().isEmpty() ? "/" : mountedUfsUri.getPath();
-          if (PathUtils.hasPrefix(ufsPath, mountedUfsPath)) {
+          if (PathUtils.hasPrefix(ufsPath, mountedUfsPath) && sameUid) { // SM
             throw new InvalidPathException(ExceptionMessage.MOUNT_POINT_PREFIX_OF_ANOTHER
                 .getMessage(mountedUfsUri.toString(), ufsUri.toString()));
           }
-          if (PathUtils.hasPrefix(mountedUfsPath, ufsPath)) {
+          if (PathUtils.hasPrefix(mountedUfsPath, ufsPath) && sameUid) {  // SM
             throw new InvalidPathException(ExceptionMessage.MOUNT_POINT_PREFIX_OF_ANOTHER
                 .getMessage(ufsUri.toString(), mountedUfsUri.toString()));
           }
         }
       }
+      LOG.info("alluxioPath: {}, ufsUri: {}, mountId: {}, options: {}", alluxioPath, ufsUri, mountId, options);
 
       Map<String, String> properties = options.getPropertiesMap();
       mState.applyAndJournal(journalContext, AddMountPointEntry.newBuilder()

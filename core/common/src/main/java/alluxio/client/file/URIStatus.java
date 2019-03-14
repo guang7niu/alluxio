@@ -182,7 +182,10 @@ public class URIStatus {
    * @return the owner of the entity referenced by this uri, mutable
    */
   public String getOwner() {
-    return mInfo.getOwner();
+    //return mInfo.getOwner();  // SM
+    String owner = mInfo.getOwner();
+    if (owner == null || owner.equals("")) owner = "root";
+    return owner;
   }
 
   /**

@@ -904,6 +904,12 @@ public final class PropertyKey implements Comparable<PropertyKey> {
       .setScope(Scope.SERVER)
       .setDisplayType(DisplayType.CREDENTIALS)
       .build();
+  public static final PropertyKey OSS_USER_ID = new Builder(Name.OSS_USER_ID) // SM
+      .setDescription("The user id of OSS bucket.")
+      .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+      .setScope(Scope.SERVER)
+      .setDisplayType(DisplayType.CREDENTIALS)
+      .build();
   public static final PropertyKey S3A_ACCESS_KEY = new Builder(Name.S3A_ACCESS_KEY)
       .setDescription("The access key of S3 bucket.")
       .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
@@ -1679,6 +1685,48 @@ public final class PropertyKey implements Comparable<PropertyKey> {
               + "approximate the `ONCE` metadata load behavior (see "
               + "`alluxio.user.file.metadata.load.type`). Larger caches will consume more "
               + "memory, but will better approximate the `ONCE` behavior.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_CAPACITY =   // SM
+      new Builder(Name.MASTER_INODE_CAPACITY)
+          .setDefaultValue(20000000)
+          .setDescription("The capacity of managable master inode.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_EVICT_RATIO =
+      new Builder(Name.MASTER_INODE_EVICT_RATIO)
+          .setDefaultValue(80)
+          .setDescription("The safe ratio of inode capacity.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_EVICT_CRITICAL_RATIO =
+      new Builder(Name.MASTER_INODE_EVICT_CRITICAL_RATIO)
+          .setDefaultValue(110)
+          .setDescription("The critical ratio of inode capacity.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_EVICT_INTERVAL =
+      new Builder(Name.MASTER_INODE_EVICT_INTERVAL)
+          .setDefaultValue("5sec")
+          .setDescription("The time interval to commit inode eviction.")
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_EVICT_BASE =
+      new Builder(Name.MASTER_INODE_EVICT_BASE)
+          .setDefaultValue(10000)
+          .setDescription("The number of inode to evict in one pass.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.MASTER)
+          .build();
+  public static final PropertyKey MASTER_INODE_CHECKPOINT_INTERVAL_MS =
+      new Builder(Name.MASTER_INODE_CHECKPOINT_INTERVAL_MS)
+          .setAlias(new String[]{"alluxio.master.inode.checkpoint.interval.ms"})
+          .setDefaultValue("1hour")
+          .setDescription("Time interval to periodically dump inode heat")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.MASTER)
           .build();
@@ -3419,6 +3467,13 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.WORKER)
           .build();
+  public static final PropertyKey WORKER_LOCAL_PATH =   // SM
+      new Builder(Name.WORKER_LOCAL_PATH)
+          .setDefaultValue("/tmp.non_existed/alluxioworker")
+          .setDescription("Local worker path.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
+          .setScope(Scope.WORKER)
+          .build();
 
   /**
    * @param fullyQualifiedClassname a fully qualified classname
@@ -3590,6 +3645,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
     public static final String OSS_ACCESS_KEY = "fs.oss.accessKeyId";
     public static final String OSS_ENDPOINT_KEY = "fs.oss.endpoint";
     public static final String OSS_SECRET_KEY = "fs.oss.accessKeySecret";
+    public static final String OSS_USER_ID = "fs.oss.userId";     // SM
     public static final String S3A_ACCESS_KEY = "aws.accessKeyId";
     public static final String S3A_SECRET_KEY = "aws.secretKey";
     public static final String SWIFT_API_KEY = "fs.swift.apikey";
@@ -3755,6 +3811,18 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.master.ufs.block.location.cache.capacity";
     public static final String MASTER_UFS_PATH_CACHE_CAPACITY =
         "alluxio.master.ufs.path.cache.capacity";
+    public static final String MASTER_INODE_CAPACITY =    // SM
+        "alluxio.master.inode.capacity";
+    public static final String MASTER_INODE_EVICT_RATIO =
+        "alluxio.master.inode.evict.ratio";
+    public static final String MASTER_INODE_EVICT_CRITICAL_RATIO =
+        "alluxio.master.inode.evict.critical.ratio";
+    public static final String MASTER_INODE_EVICT_INTERVAL =
+        "alluxio.master.inode.evict.interval";
+    public static final String MASTER_INODE_EVICT_BASE =
+        "alluxio.master.inode.evict.base";
+    public static final String MASTER_INODE_CHECKPOINT_INTERVAL_MS =
+        "alluxio.master.inode.checkpoint.interval";
     public static final String MASTER_UFS_PATH_CACHE_THREADS =
         "alluxio.master.ufs.path.cache.threads";
     public static final String MASTER_WEB_BIND_HOST = "alluxio.master.web.bind.host";
@@ -4110,6 +4178,8 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.jvm.monitor.sleep.interval";
     public static final String MASTER_JVM_MONITOR_ENABLED = "alluxio.master.jvm.monitor.enabled";
     public static final String WORKER_JVM_MONITOR_ENABLED = "alluxio.worker.jvm.monitor.enabled";
+
+    public static final String WORKER_LOCAL_PATH = "alluxio.worker.local.path";     // SM
 
     private Name() {} // prevent instantiation
   }

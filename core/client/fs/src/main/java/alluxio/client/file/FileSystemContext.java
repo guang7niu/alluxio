@@ -13,6 +13,7 @@ package alluxio.client.file;
 
 import alluxio.ClientContext;
 import alluxio.conf.AlluxioConfiguration;
+import alluxio.MetaCache;
 import alluxio.conf.PropertyKey;
 import alluxio.client.block.BlockMasterClient;
 import alluxio.client.block.BlockMasterClientPool;
@@ -57,6 +58,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static java.util.stream.Collectors.toList;
+import static java.util.stream.Collectors.toSet;
 
 import javax.annotation.concurrent.GuardedBy;
 import javax.annotation.concurrent.ThreadSafe;
@@ -436,6 +440,7 @@ public final class FileSystemContext implements Closeable {
   }
 
   private void initializeLocalWorker() throws IOException {
+    MetaCache.invalidateWorkerInfoList();   // SM
     List<WorkerNetAddress> addresses = getWorkerAddresses();
     if (!addresses.isEmpty()) {
       if (addresses.get(0).getHost().equals(NetworkAddressUtils.getClientHostName(mClientContext

@@ -94,7 +94,7 @@ func symlink(oldname, newname string) {
 }
 
 func getCommonMvnArgs(hadoopVersion version) []string {
-	args := []string{"clean", "install", "-DskipTests", "-Dfindbugs.skip", "-Dmaven.javadoc.skip", "-Dcheckstyle.skip", "-Pmesos"}
+	args := []string{"clean", "install", "-Dlicense.skip", "-DskipTests", "-Dfindbugs.skip", "-Dmaven.javadoc.skip", "-Dcheckstyle.skip", "-Pmesos"}
 	if mvnArgsFlag != "" {
 		for _, arg := range strings.Split(mvnArgsFlag, ",") {
 			args = append(args, arg)
@@ -214,6 +214,7 @@ func addAdditionalFiles(srcPath, dstPath string, hadoopVersion version, version 
 		fmt.Sprintf("lib/alluxio-underfs-s3a-%v.jar", version),
 		fmt.Sprintf("lib/alluxio-underfs-swift-%v.jar", version),
 		fmt.Sprintf("lib/alluxio-underfs-wasb-%v.jar", version),
+		fmt.Sprintf("lib/alluxio-underfs-kodo-%v.jar", version),
 		"libexec/alluxio-config.sh",
 		"LICENSE",
 	}
@@ -268,7 +269,7 @@ func generateTarball(hadoopDistribution string) error {
 	run(fmt.Sprintf("copying source from %v to %v", repoPath, srcPath), "cp", "-R", repoPath+"/.", srcPath)
 
 	chdir(srcPath)
-	run("running git clean -fdx", "git", "clean", "-fdx")
+	// run("running git clean -fdx", "git", "clean", "-fdx")
 
 	version, err := getVersion()
 	if err != nil {
@@ -313,7 +314,7 @@ func generateTarball(hadoopDistribution string) error {
 	run("copying alluxio-ui master webapp build directory", "cp", "-r", filepath.Join(masterWebappDir, "build"), filepath.Join(dstPath, masterWebappDir))
 
 	workerWebappDir := "alluxio-ui/worker"
-	run ("creating alluxio-ui worker webapp directory", "mkdir", "-p", filepath.Join(dstPath, workerWebappDir))
+	run("creating alluxio-ui worker webapp directory", "mkdir", "-p", filepath.Join(dstPath, workerWebappDir))
 	run("copying alluxio-ui worker webapp build directory", "cp", "-r", filepath.Join(workerWebappDir, "build"), filepath.Join(dstPath, workerWebappDir))
 
 	if includeYarnIntegration(hadoopVersion) {
