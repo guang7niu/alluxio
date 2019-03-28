@@ -325,13 +325,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
   /** This manages the file system inode structure. This must be journaled. */
   private final InodeTree mInodeTree;
 
-  // SM
-  private final long INODE_CAPACITY = ServerConfiguration.getLong(PropertyKey.MASTER_INODE_CAPACITY);
-  private final long INODE_CAPACITY_EVICT = INODE_CAPACITY / 100
-        * ServerConfiguration.getLong(PropertyKey.MASTER_INODE_EVICT_RATIO);
-  private final long INODE_CAPACITY_CRITICAL = INODE_CAPACITY / 100
-        * ServerConfiguration.getLong(PropertyKey.MASTER_INODE_EVICT_CRITICAL_RATIO);
-
   /** Store for holding inodes. */
   private final ReadOnlyInodeStore mInodeStore;
 
@@ -355,8 +348,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
 
   /** Set of file IDs to persist. */
   private final Map<Long, alluxio.time.ExponentialTimer> mPersistRequests;
-
-  private final AsyncInodeFileEvictor mAsyncInodeFileEvictor;   // SM
 
   /** Map from file IDs to persist jobs. */
   private final Map<Long, PersistJob> mPersistJobs;
@@ -423,7 +414,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
     // TODO(gene): Handle default config value for whitelist.
     mWhitelist = new PrefixList(ServerConfiguration.getList(PropertyKey.MASTER_WHITELIST, ","));
 
-    mAsyncInodeFileEvictor = new AsyncInodeFileEvictor(this, mInodeTree, INODE_CAPACITY, INODE_CAPACITY_EVICT);   // SM
     mPermissionChecker = new DefaultPermissionChecker(mInodeTree);
     mJobMasterClientPool = new JobMasterClientPool(JobMasterClientContext
         .newBuilder(ClientContext.create(ServerConfiguration.global())).build());
@@ -634,11 +624,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
           new HeartbeatThread(HeartbeatContext.MASTER_METRICS_TIME_SERIES,
               new TimeSeriesRecorder(),
               (int) ServerConfiguration.getMs(PropertyKey.MASTER_METRICS_TIME_SERIES_INTERVAL),
-              ServerConfiguration.global()));
-      getExecutorService().submit(  // SM
-          new HeartbeatThread(HeartbeatContext.MASTER_ASYNC_INODE_EVICT,
-              mAsyncInodeFileEvictor,
-              (int) ServerConfiguration.getMs(PropertyKey.MASTER_INODE_EVICT_INTERVAL),
               ServerConfiguration.global()));
       if (ServerConfiguration.getBoolean(PropertyKey.MASTER_STARTUP_CONSISTENCY_CHECK_ENABLED)) {
         mStartupConsistencyCheck = getExecutorService().submit(() -> startupCheckConsistency(
@@ -904,8 +889,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
         throw new FileDoesNotExistException(e.getMessage(), e);
       }
     }
-
-    mAsyncInodeFileEvictor.setLastAccessTs(inode.getId(), System.currentTimeMillis());  // SM
 
     MountTable.Resolution resolution;
     try {
@@ -1355,19 +1338,11 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
     Metrics.FILES_COMPLETED.inc();
   }
 
-  public void checkCriticalCapacity() throws AccessControlException {   // SM
-    if (mInodeTree.estimateSize() >= INODE_CAPACITY_CRITICAL) {
-      throw new AccessControlException("=== !!! Too many files! " + mInodeTree.estimateSize());
-    }
-  }
-
   @Override
   public long createFile(AlluxioURI path, CreateFileContext context)
       throws AccessControlException, InvalidPathException, FileAlreadyExistsException,
       BlockInfoException, IOException, FileDoesNotExistException {
     Metrics.CREATE_FILES_OPS.inc();
-
-    checkCriticalCapacity();  // SM not allowed if too many files
 
     LockingScheme lockingScheme = createLockingScheme(path, context.getOptions().getCommonOptions(),
             LockPattern.WRITE_EDGE);
@@ -1415,12 +1390,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
     }
     // If the create succeeded, the list of created inodes will not be empty.
     List<Inode> created = mInodeTree.createPath(rpcContext, inodePath, context);
-
-    // SM don't let a ls of folder with many files flush out existing files
-    if (created != null && created.size() > 0) {
-      mAsyncInodeFileEvictor.setLastAccessTs(
-          created.get(created.size() - 1).asFile().getId(), mAsyncInodeFileEvictor.getMiddle());
-    }
 
     if (context.isPersisted()) {
       // The path exists in UFS, so it is no longer absent. The ancestors exist in UFS, but the
@@ -1686,13 +1655,14 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
       LockedInodePath tempInodePath = delInodePair.getSecond();
       mInodeTree.deleteInode(rpcContext, tempInodePath, opTimeMs);
 
+      /*  SM
       if (deleteContext.getOptions().getAlluxioOnly() && tempInodePath.getInode().isPersisted()) {  // SM
         InodeDirectory parentDir = tempInodePath.getParentInodeDirectory();
         if (parentDir != null && parentDir.isDirectChildrenLoaded()) {
           mInodeTree.setDirectChildrenLoaded(rpcContext, parentDir);
           LOG.info("=== set off direct children load {}", parentDir.getName());
         }
-      }
+      } */
     }
 
     if (!failedUris.isEmpty()) {
@@ -2452,8 +2422,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
     MountTable.Resolution resolution = mMountTable.resolve(path);
     AlluxioURI ufsUri = resolution.getUri();
 
-    checkCriticalCapacity();  // SM
-
     try (CloseableResource<UnderFileSystem> ufsResource = resolution.acquireUfsResource()) {
       UnderFileSystem ufs = ufsResource.get();
       if (context.getUfsStatus() == null && !ufs.exists(ufsUri.toString())) {
@@ -3109,8 +3077,6 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
         throw e;
       }
 
-      mAsyncInodeFileEvictor.setLastAccessTs(inodePath.getInode().getId(), System.currentTimeMillis());  // SM not persisted 
-
       setAttributeInternal(rpcContext, inodePath, context);
       auditContext.setSucceeded(true);
     }
@@ -3595,8 +3561,7 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
         setAttribute(getPath(fileId),
             SetAttributeContext
                 .mergeFrom(SetAttributePOptions.newBuilder().setPersisted(true))
-                .setUfsFingerprint(ufsFingerprint)
-                .setAccessTimeMs(mAsyncInodeFileEvictor.getMin()));   // SM will be removed first if not successive access
+                .setUfsFingerprint(ufsFingerprint));
       } catch (FileDoesNotExistException | AccessControlException | InvalidPathException e) {
         LOG.error("Failed to set file {} as persisted, because {}", fileId, e);
       }
@@ -3608,12 +3573,44 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
 
     // SM EVICT -> PERSIST or FREE
     Set<Long> s = MetaCache.getEvictBlock(MetaCache.EVICT_EVICT, workerId);
+    List<WorkerInfo> remote = null;
     for (Long id: s) {
       try {
         long fileId = IdUtils.createFileId(BlockId.getContainerId(id));
         FileInfo info = getFileInfo(fileId);
+        boolean replicated = true;
         if (info.isPersisted()) {
-          MetaCache.addEvictBlock(MetaCache.EVICT_FREE, workerId, id);
+          if (remote == null) {
+            remote = getWorkerInfoList().stream()
+              .filter(w -> w.getAddress().getWebPort() < MetaCache.WORKER_PORT_MIN)
+              .collect(Collectors.toList());
+          }
+          // last replica in local worker, demote to remote
+          for (FileBlockInfo fb: info.getFileBlockInfos()) {
+            if (fb.getBlockInfo().getBlockId() == id) {
+              List<BlockLocation> l = fb.getBlockInfo().getLocations();
+              if (l.size() == 1 && remote.size() > 0
+                  && l.get(0).getWorkerAddress().getWebPort() >= MetaCache.WORKER_PORT_MIN) {
+                replicated = false;
+              }
+              break;
+            }
+          }
+          if (!replicated) {
+            alluxio.job.replicate.ReplicateConfig config =
+              new alluxio.job.replicate.ReplicateConfig(info.getPath(), id, 2);
+            JobMasterClient client = mJobMasterClientPool.acquire();
+            try {
+              LOG.debug("==== EVICT: schedule replicate for {}:{} before free", info.getPath(), id);
+              client.run(config);
+            } catch (Exception e) {
+              LOG.error("==== EVICT: schedule replicate {}:{} err {}", info.getPath(), id, e.getMessage());
+            } finally {
+              mJobMasterClientPool.release(client);
+            }
+          } else {
+            MetaCache.addEvictBlock(MetaCache.EVICT_FREE, workerId, id);
+          }
         } else {
           scheduleAsyncPersistence(new AlluxioURI(info.getPath()));
         }

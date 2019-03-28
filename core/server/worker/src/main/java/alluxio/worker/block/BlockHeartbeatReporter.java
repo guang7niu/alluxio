@@ -60,12 +60,10 @@ public final class BlockHeartbeatReporter extends AbstractBlockStoreEventListene
     synchronized (mLock) {
       // Copy added and removed blocks
       Map<String, List<Long>> addedBlocks = new HashMap<>(mAddedBlocks);
-      //List<Long> removedBlocks = new ArrayList<>(mRemovedBlocks);
-      List<Long> removedBlocks = new ArrayList<>(mEvictBlocks);     // SM
-      if (removedBlocks.size() > 0) {
-          removedBlocks.add((long)0);   // 0 as delimiter
-      }
-      removedBlocks.addAll(mRemovedBlocks);
+      List<Long> removedBlocks = new ArrayList<>();     // SM
+      removedBlocks.add(Long.valueOf(mEvictBlocks.size()));           // first counts the evict size
+      removedBlocks.addAll(mEvictBlocks);        // then evict block
+      removedBlocks.addAll(mRemovedBlocks);             // then removed block
 
       // Clear added and removed blocks
       mAddedBlocks.clear();
@@ -98,6 +96,15 @@ public final class BlockHeartbeatReporter extends AbstractBlockStoreEventListene
   public void onRemoveBlockByWorker(long sessionId, long blockId) {
     synchronized (mLock) {
       removeBlockInternal(blockId);
+    }
+  }
+
+  @Override
+  public void onEvictBlockByWorker(long sessionId, long blockId) { // SM
+    synchronized (mLock) {
+      if (!mEvictBlocks.contains(blockId)) {
+        mEvictBlocks.add(blockId);
+      }
     }
   }
 

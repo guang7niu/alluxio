@@ -104,6 +104,7 @@ public class DefaultAuthenticationServer
       AuthenticatedChannelInfo clientInfo = mChannels.get(channelId);
       return clientInfo.getUserName();
     } else {
+      //return "root";  // SM
       throw new UnauthenticatedException(
           String.format("Client:%s needs to be authenticated", channelId.toString()));
     }

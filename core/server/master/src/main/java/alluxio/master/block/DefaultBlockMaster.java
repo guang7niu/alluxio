@@ -810,6 +810,10 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
       processWorkerRemovedBlocks(worker, removedBlocks);
       processWorkerAddedBlocks(worker, currentBlocksOnTiers);
       processWorkerOrphanedBlocks(worker);
+      LOG.info("registerWorker(): id:{}, adr:{}, cap:{}, avail:{}, total_tier:{}, free_tier:{}, blocks:{}, to_remove:{}", 
+        worker.getId(), worker.getWorkerAddress(), worker.getCapacityBytes(), 
+        worker.getAvailableBytes(), worker.getTotalBytesOnTiers(), worker.getFreeBytesOnTiers(), 
+        worker.getBlocks().size(), worker.getToRemoveBlocks().size());
     }
     if (options.getConfigsCount() > 0) {
       for (BiConsumer<Address, List<ConfigProperty>> function : mWorkerRegisteredListeners) {
@@ -820,8 +824,6 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
     }
 
     registerWorkerInternal(workerId);
-
-    LOG.info("registerWorker(): {}", worker);
   }
 
   @Override
@@ -839,30 +841,18 @@ public final class DefaultBlockMaster extends CoreMaster implements BlockMaster 
       // detection can remove it. However, we are intentionally ignoring this race, since the worker
       // will just re-register regardless.
 
-      // SM don't want to change thrift (see its warning), so use '0' to delimit the
-      // to_be_remove and already_removed block ids
-      Set<Long> evictingBlocks = new HashSet<Long>();
-      for (int i = 0; i < removedBlockIds.size(); i++) {
-        if (removedBlockIds.get(i) == 0) {
-          for (int j = 0; j < i; j++) {
-            long blockId = removedBlockIds.get(0);
-            evictingBlocks.add(blockId);
-            removedBlockIds.remove(0);
-          }
-          removedBlockIds.remove(0);
-          break;
+      // SM first item is evict count followed by evict blocks, then removed blocks
+      List<Long> realRemoved = new ArrayList<>();
+      int evictSize = removedBlockIds.size() > 0 ? removedBlockIds.get(0).intValue() : 0;
+      for (int i = 1; i < removedBlockIds.size(); i ++) {
+        if (i < evictSize + 1) {
+          MetaCache.addEvictBlock(MetaCache.EVICT_EVICT, workerId, removedBlockIds.get(i));
+        } else {
+          realRemoved.add(removedBlockIds.get(i));
         }
       }
-      /** // SM 
-       * we now add to queue for workerId without blocks, but may move to another worker queue later
-       * sicne we can't get file info in the block context.
-       * we will let the worker with first block to handle persist to avoid duplication.
-       */
-      for (Long id: evictingBlocks) {
-        MetaCache.addEvictBlock(MetaCache.EVICT_EVICT, workerId, id);
-      }
 
-      processWorkerRemovedBlocks(worker, removedBlockIds);
+      processWorkerRemovedBlocks(worker, realRemoved /*removedBlockIds*/);  // SM
       processWorkerAddedBlocks(worker, addedBlocksOnTiers);
       processWorkerMetrics(worker.getWorkerAddress().getHost(), metrics);
 

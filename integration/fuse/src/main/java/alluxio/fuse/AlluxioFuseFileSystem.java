@@ -97,19 +97,19 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
   private static final long GID = AlluxioFuseUtils.getGid(System.getProperty("user.name"));
 
   // SM
-  private static AlluxioConfiguration conf = new InstancedConfiguration(ConfigurationUtils.defaults());
-  private static final int MAX_WORKERS_TO_RETRY =
-      conf.getInt(PropertyKey.USER_BLOCK_WORKER_CLIENT_READ_RETRY);
+  private static AlluxioConfiguration mConf = new InstancedConfiguration(ConfigurationUtils.defaults());
   private static final String mSeed = ".tmp.ava.alluxiosc.tmp";
   private static final String mCacheSeed = ".tmp.cache.tmp.ava.alluxiosc.tmp";
   private static final int SHORT_CIRCUIT_SIZE = 512;
 
   class OpenFileEntry2 extends OpenFileEntry {
     private FuseFileInfo mFI;
+    private boolean mCreated;
 
     public OpenFileEntry2(long id, String path, FileInStream in, FileOutStream out, FuseFileInfo fi) {
       super(id, path, in, out);
       mFI = fi;
+      mCreated = false;
     }
 
     public FuseFileInfo getFI() {
@@ -118,6 +118,14 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
 
     public void setFI(FuseFileInfo fi) {
       mFI = fi;
+    }
+
+    public boolean getCreated() {
+      return mCreated;
+    }
+
+    public void setCreated(boolean created) {
+      mCreated = created;
     }
   }
 
@@ -304,7 +312,9 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
 
       FileOutStream os = mFileSystem.createFile(uri);
       synchronized (mOpenFiles) {
-        mOpenFiles.add(new OpenFileEntry2(mNextOpenFileId, path, null, os, fi));
+        OpenFileEntry2 oe = new OpenFileEntry2(mNextOpenFileId, path, null, os, fi);
+        oe.setCreated(true);
+        mOpenFiles.add(oe);
         fi.fh.set(mNextOpenFileId);
 
         // Assuming I will never wrap around (2^64 open files are quite a lot anyway)
@@ -383,7 +393,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
 
     if (path.endsWith(mCacheSeed)) {
       path = path.substring(0, path.length() - mCacheSeed.length()); 
-      mFileSystem.startAsyncCache(path);
+      mFileSystem.asyncCache(path);
     }
 
     return 0;
@@ -637,54 +647,38 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
     LOG.trace("read({}, {}, {})", path, size, offset);
     final int sz = (int) size;
     final long fd = fi.fh.get();
+    OpenFileEntry2 oe = mOpenFiles.getFirstByField(ID_INDEX, fd);
+    if (oe == null) {
+      LOG.error("Cannot find fd for {} in table", path);
+      MetaCache.invalidate(path);
+      return -ErrorCodes.EBADFD();
+    }
+
     int rd = 0;
     int nread = 0;
-
-    // SM
-    CountingRetry retry = new CountingRetry(MAX_WORKERS_TO_RETRY);
-    while (true) {
-      OpenFileEntry2 oe = mOpenFiles.getFirstByField(ID_INDEX, fd);
-      if (oe == null) {
-        LOG.error("Cannot find fd for {} in table", path);
-        MetaCache.invalidate(path);
-        return -ErrorCodes.EBADFD();
-      }
-
-      rd = 0;
-      nread = 0;
-      if (oe.getIn() == null) {
-        LOG.error("{} was not open for reading", path);
-        return -ErrorCodes.EBADFD();
-      }
-      try {
-        oe.getIn().seek(offset);
-        final byte[] dest = new byte[sz];
-        while (rd >= 0 && nread < size) {
-          rd = oe.getIn().read(dest, nread, sz - nread);
-          if (rd >= 0) {
-            nread += rd;
-          }
+    if (oe.getIn() == null) {
+      LOG.error("{} was not open for reading", path);
+      return -ErrorCodes.EBADFD();
+    }
+    try {
+      oe.getIn().seek(offset);
+      final byte[] dest = new byte[sz];
+      while (rd >= 0 && nread < size) {
+        rd = oe.getIn().read(dest, nread, sz - nread);
+        if (rd >= 0) {
+          nread += rd;
         }
-
-        if (nread == -1) { // EOF
-          nread = 0;
-        } else if (nread > 0) {
-          buf.put(0, dest, 0, nread);
-        }
-        break;  //qiniu
-      } catch (IOException e) {
-        MetaCache.invalidate(path);
-        LOG.error("IOException while reading from {}.", path, e);
-        if (handleRetryableException(path, fd, e) && retry.attempt()) {
-          LOG.info("=== retrying {}: path:{} fd:{}", retry.getAttemptCount(), path, fd);
-          continue;
-        } 
-        return AlluxioFuseUtils.getErrorCode(e);
-      } catch (Throwable t) {
-        MetaCache.invalidate(path);
-        LOG.error("Failed to read file {}", path, t);
-        return AlluxioFuseUtils.getErrorCode(t);
       }
+
+      if (nread == -1) { // EOF
+        nread = 0;
+      } else if (nread > 0) {
+        buf.put(0, dest, 0, nread);
+      }
+    } catch (Throwable t) {
+      LOG.error("Failed to read file {}", path, t);
+      MetaCache.invalidate(path);
+      return AlluxioFuseUtils.getErrorCode(t);
     }
 
     return nread;
@@ -714,7 +708,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
    */
   private static List<AlluxioURI> checkConsistency(AlluxioURI path, CheckConsistencyPOptions options)
       throws IOException {
-    FileSystemContext context = FileSystemContext.create(conf);
+    FileSystemContext context = FileSystemContext.create(mConf);
     FileSystemMasterClient client = context.acquireMasterClient();
     try {
       return client.checkConsistency(path, options);
@@ -844,12 +838,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
       return -ErrorCodes.EBADFD();
     }
 
-    /** - SM 
-     * This will clear the path cache after release, but stat cache will be shared during traversing
-     * the blocks. Usually, file won't be repeatly visited, so this won't impact performance a lot,
-     * however, the attr and block cache can be refreshed next time the file is visited. 
-     */
-    //MetaCache.invalidate(path);
+    if (oe.getCreated()) MetaCache.invalidate(path);  // SM
 
     try {
       oe.close();
@@ -928,14 +917,13 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
         LOG.error("File {} does not exist", uri);
         return -ErrorCodes.ENOENT();
       }
-      OpenFileEntry2 oe = null;
+      OpenFileEntry2 oe = mOpenFiles.getFirstByField(PATH_INDEX, path);
       if (0 == size) {
         try {
           unlink(path); 
         } catch (Exception e) {
           LOG.warn("=== exception during unlink {} in trunk {}", path, e.getMessage());
         }
-        oe = mOpenFiles.getFirstByField(PATH_INDEX, path);
         synchronized (mOpenFiles) {
           try {
             if (oe != null) {
@@ -952,8 +940,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
         }
         return 0;
       } 
-      oe = mOpenFiles.getFirstByField(PATH_INDEX, path);
-      if (oe == null || oe.getOut() == null || size < oe.getWriteOffset()) {
+      if (oe == null || !oe.getCreated() || oe.getOut() == null || size < oe.getWriteOffset()) {
         LOG.error("File {} does not exist or not open for write or size {} is too small", uri, size);
         return -ErrorCodes.EINVAL();
       }
@@ -1050,9 +1037,10 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
       oe.getOut().write(dest);
       oe.setWriteOffset(offset + size);
     } catch (IOException e) {
-      MetaCache.invalidate(path);   // SM
       LOG.error("IOException while writing to {}.", path, e);
       return -ErrorCodes.EIO();
+    } finally {
+      MetaCache.invalidate(path);   // SM
     }
 
     return sz;
@@ -1111,7 +1099,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
    */
   LoadingCache<String, AlluxioURI> getPathResolverCache() {
     //return mPathResolverCache; // SM
-    final int maxCachedPaths = conf.getInt(PropertyKey.FUSE_CACHED_PATHS_MAX);
+    final int maxCachedPaths = mConf.getInt(PropertyKey.FUSE_CACHED_PATHS_MAX);
     LoadingCache<String, AlluxioURI> c = CacheBuilder.newBuilder()
         .maximumSize(maxCachedPaths)
         .build(new PathCacheLoader());

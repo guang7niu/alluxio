@@ -1279,6 +1279,13 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
           .setScope(Scope.MASTER)
           .build();
+  public static final PropertyKey MASTER_METASTORE_INODE_CACHE_BACKING_RATIO =      // SM
+      new Builder(Name.MASTER_METASTORE_INODE_CACHE_BACKING_RATIO)
+          .setDefaultValue("100")
+          .setDescription("The inode cache ratio between backing and caching store.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+          .setScope(Scope.MASTER)
+          .build();
   public static final PropertyKey MASTER_METRICS_TIME_SERIES_INTERVAL =
       new Builder(Name.MASTER_METRICS_TIME_SERIES_INTERVAL)
           .setDefaultValue("5min")
@@ -1685,48 +1692,6 @@ public final class PropertyKey implements Comparable<PropertyKey> {
               + "approximate the `ONCE` metadata load behavior (see "
               + "`alluxio.user.file.metadata.load.type`). Larger caches will consume more "
               + "memory, but will better approximate the `ONCE` behavior.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_CAPACITY =   // SM
-      new Builder(Name.MASTER_INODE_CAPACITY)
-          .setDefaultValue(20000000)
-          .setDescription("The capacity of managable master inode.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_EVICT_RATIO =
-      new Builder(Name.MASTER_INODE_EVICT_RATIO)
-          .setDefaultValue(80)
-          .setDescription("The safe ratio of inode capacity.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_EVICT_CRITICAL_RATIO =
-      new Builder(Name.MASTER_INODE_EVICT_CRITICAL_RATIO)
-          .setDefaultValue(110)
-          .setDescription("The critical ratio of inode capacity.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_EVICT_INTERVAL =
-      new Builder(Name.MASTER_INODE_EVICT_INTERVAL)
-          .setDefaultValue("5sec")
-          .setDescription("The time interval to commit inode eviction.")
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_EVICT_BASE =
-      new Builder(Name.MASTER_INODE_EVICT_BASE)
-          .setDefaultValue(10000)
-          .setDescription("The number of inode to evict in one pass.")
-          .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
-          .setScope(Scope.MASTER)
-          .build();
-  public static final PropertyKey MASTER_INODE_CHECKPOINT_INTERVAL_MS =
-      new Builder(Name.MASTER_INODE_CHECKPOINT_INTERVAL_MS)
-          .setAlias(new String[]{"alluxio.master.inode.checkpoint.interval.ms"})
-          .setDefaultValue("1hour")
-          .setDescription("Time interval to periodically dump inode heat")
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.MASTER)
           .build();
@@ -3742,6 +3707,8 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.master.metastore.inode.cache.low.water.mark.ratio";
     public static final String MASTER_METASTORE_INODE_CACHE_MAX_SIZE =
         "alluxio.master.metastore.inode.cache.max.size";
+    public static final String MASTER_METASTORE_INODE_CACHE_BACKING_RATIO =  // SM
+        "alluxio.master.metastore.inode.cache.backing.ratio";
     public static final String MASTER_PERSISTENCE_CHECKER_INTERVAL_MS =
         "alluxio.master.persistence.checker.interval.ms";
     public static final String MASTER_METRICS_TIME_SERIES_INTERVAL =
@@ -3811,18 +3778,6 @@ public final class PropertyKey implements Comparable<PropertyKey> {
         "alluxio.master.ufs.block.location.cache.capacity";
     public static final String MASTER_UFS_PATH_CACHE_CAPACITY =
         "alluxio.master.ufs.path.cache.capacity";
-    public static final String MASTER_INODE_CAPACITY =    // SM
-        "alluxio.master.inode.capacity";
-    public static final String MASTER_INODE_EVICT_RATIO =
-        "alluxio.master.inode.evict.ratio";
-    public static final String MASTER_INODE_EVICT_CRITICAL_RATIO =
-        "alluxio.master.inode.evict.critical.ratio";
-    public static final String MASTER_INODE_EVICT_INTERVAL =
-        "alluxio.master.inode.evict.interval";
-    public static final String MASTER_INODE_EVICT_BASE =
-        "alluxio.master.inode.evict.base";
-    public static final String MASTER_INODE_CHECKPOINT_INTERVAL_MS =
-        "alluxio.master.inode.checkpoint.interval";
     public static final String MASTER_UFS_PATH_CACHE_THREADS =
         "alluxio.master.ufs.path.cache.threads";
     public static final String MASTER_WEB_BIND_HOST = "alluxio.master.web.bind.host";

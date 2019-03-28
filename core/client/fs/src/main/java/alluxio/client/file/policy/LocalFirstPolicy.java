@@ -19,6 +19,7 @@ import alluxio.network.TieredIdentityFactory;
 import alluxio.util.TieredIdentityUtils;
 import alluxio.wire.TieredIdentity;
 import alluxio.wire.WorkerNetAddress;
+import alluxio.MetaCache;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -44,13 +45,6 @@ public final class LocalFirstPolicy implements FileWriteLocationPolicy, BlockLoc
   private final TieredIdentity mTieredIdentity;
   private final AlluxioConfiguration mConf;
 
-  private static List<String> writerHosts = null;   // SM
-  {
-      String hosts = System.getenv("QINIU_WRITER_HOSTS");
-      if (hosts != null) writerHosts = Arrays.asList(hosts.split("\\s*,\\s*"));
-      if (writerHosts == null) writerHosts = new ArrayList<String>();
-  }
-
   /**
    * Constructs a {@link LocalFirstPolicy}.
    *
@@ -74,14 +68,14 @@ public final class LocalFirstPolicy implements FileWriteLocationPolicy, BlockLoc
   }
 
   /** // SM
-   * If configured, write goes to specified workers unless there is none satisified.  - qiniu
+   * If configured, write goes to specified workers unless there is none satisified.
    */
   @Override
   @Nullable
   public WorkerNetAddress getWorkerForNextBlock(Iterable<BlockWorkerInfo> workerInfoList, long blockSizeBytes) {
     List<BlockWorkerInfo> shuffledWorkers = Lists.newArrayList(workerInfoList);
     List<BlockWorkerInfo> candidateWorkers = shuffledWorkers.stream()
-        .filter(w -> writerHosts.contains(w.getNetAddress().getHost() + ":" + w.getNetAddress().getDataPort()))
+        .filter(w -> w.getNetAddress().getDataPort() < MetaCache.WORKER_PORT_MIN) // writer worker has dataport > WORKER_PORT_MIN
         .collect(Collectors.toList());
     WorkerNetAddress worker = getWorkerForNextBlockImpl(candidateWorkers, blockSizeBytes);
     if (worker != null) return worker;

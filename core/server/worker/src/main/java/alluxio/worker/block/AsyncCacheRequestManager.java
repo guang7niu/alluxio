@@ -89,10 +89,6 @@ public class AsyncCacheRequestManager {
       mBlockWorker.evictBlock(blockId);
       return;
     }
-    if (mPendingRequests.size() >= 200) {
-      LOG.info("!!! too many asyn cach requests pending");
-      return;
-    }
 
     if (mPendingRequests.putIfAbsent(blockId, request) != null) {
       // This block is already planned.

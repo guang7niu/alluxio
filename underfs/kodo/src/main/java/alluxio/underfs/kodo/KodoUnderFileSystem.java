@@ -192,7 +192,7 @@ public class KodoUnderFileSystem extends ObjectUnderFileSystem {
       }
       return new ObjectStatus(key, fileInfo.hash, fileInfo.fsize, fileInfo.putTime / 10000);
     } catch (QiniuException e) {
-      LOG.warn("Failed to get Object {}, Msg: {}", key, e);
+      LOG.debug("Failed to get Object {}, Msg: {}", key, e);
     }
     return null;
   }

@@ -11,6 +11,7 @@
 
 package alluxio.job.replicate;
 
+import alluxio.MetaCache;
 import alluxio.client.block.AlluxioBlockStore;
 import alluxio.client.file.BaseFileSystem;
 import alluxio.client.file.FileSystem;
@@ -94,12 +95,26 @@ public final class ReplicateDefinition
     Map<WorkerInfo, SerializableVoid> result = Maps.newHashMap();
 
     Collections.shuffle(jobWorkerInfoList);
+    // SM try non-local worker first
     for (WorkerInfo workerInfo : jobWorkerInfoList) {
+      if (workerInfo.getAddress().getWebPort() < MetaCache.WORKER_PORT_MIN) continue;
       // Select job workers that don't have this block locally to replicate
       if (!hosts.contains(workerInfo.getAddress().getHost())) {
         result.put(workerInfo, null);
         if (result.size() >= numReplicas) {
           break;
+        }
+      }
+    }
+    if (result.size() < numReplicas) {  // SM
+      for (WorkerInfo workerInfo : jobWorkerInfoList) {
+        if (workerInfo.getAddress().getWebPort() >= MetaCache.WORKER_PORT_MIN) continue;  // SM
+        // Select job workers that don't have this block locally to replicate
+        if (!hosts.contains(workerInfo.getAddress().getHost())) {
+          result.put(workerInfo, null);
+          if (result.size() >= numReplicas) {
+            break;
+          }
         }
       }
     }

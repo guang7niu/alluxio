@@ -149,6 +149,7 @@ public abstract class Cache<K, V> implements Closeable {
       entry.mDirty = true;
       return entry;
     });
+    afterPut(key, value);
     wakeEvictionThreadIfNecessary();
   }
 
@@ -230,7 +231,8 @@ public abstract class Cache<K, V> implements Closeable {
   }
 
   private void wakeEvictionThreadIfNecessary() {
-    if (mEvictionThread.mIsSleeping && mMap.size() >= mHighWaterMark) {
+    if (mEvictionThread.mIsSleeping && (mMap.size() >= mHighWaterMark     // SM
+          || System.currentTimeMillis() - mEvictionThread.mLastTickleTs > mEvictionThread.TICKLE_INTERVAL)) {
       kickEvictionThread();
     }
   }
@@ -271,6 +273,12 @@ public abstract class Cache<K, V> implements Closeable {
     private final List<Entry> mEvictionCandidates = new ArrayList<>(mEvictBatchSize);
     private final List<Entry> mDirtyEvictionCandidates = new ArrayList<>(mEvictBatchSize);
 
+    // SM
+    @VisibleForTesting
+    final long TICKLE_INTERVAL = 10 * 60 * 1000;  // 10 mins
+    @VisibleForTesting
+    volatile long mLastTickleTs = System.currentTimeMillis();
+
     private EvictionThread() {
       super(mName + "-eviction-thread");
     }
@@ -280,6 +288,9 @@ public abstract class Cache<K, V> implements Closeable {
       while (!Thread.interrupted()) {
         // Wait for the cache to get over the high water mark.
         while (!overHighWaterMark()) {
+          if (System.currentTimeMillis() - mLastTickleTs > TICKLE_INTERVAL) {   // SM
+            if (tickle()) mLastTickleTs = System.currentTimeMillis();
+          }
           synchronized (mEvictionThread) {
             if (!overHighWaterMark()) {
               try {
@@ -291,6 +302,10 @@ public abstract class Cache<K, V> implements Closeable {
               }
             }
           }
+        }
+        if (System.currentTimeMillis() - mLastTickleTs > TICKLE_INTERVAL) {
+          tickle();   // SM
+          mLastTickleTs = System.currentTimeMillis();
         }
         evictToLowWaterMark();
       }
@@ -396,6 +411,10 @@ public abstract class Cache<K, V> implements Closeable {
    * @param value the added value
    */
   protected void onPut(K key, V value) {}
+
+  protected void afterPut(K key, V value) {}
+
+  protected boolean tickle() { return true; }  // SM
 
   /**
    * Callback triggered whenever a key is removed by remove(key).

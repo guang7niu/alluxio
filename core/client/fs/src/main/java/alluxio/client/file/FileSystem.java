@@ -75,9 +75,8 @@ import javax.security.auth.Subject;
 @PublicApi
 public interface FileSystem extends Closeable {
   // SM
+  public void asyncCache(String file);
   public String acquireShortCircuitPath(String file);
-  public void startAsyncCache(String file);
-  public boolean startBlockCache(int action, long id, String worker, URIStatus status);
 
   /**
    * Factory for {@link FileSystem}. Calling any of the {@link Factory#get()} methods in this class

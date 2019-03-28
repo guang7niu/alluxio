@@ -63,7 +63,7 @@ public class MetaCache {
   private static boolean blockCacheEnabled = true;
   private static boolean workerCacheEnabled = true;
 
-  public static final int LOCAL_WORKER_PORT_MIN = 50000;
+  public static final int WORKER_PORT_MIN = 50000;
   public static final String WORKER_LOCAL_PATH = conf.get(PropertyKey.WORKER_LOCAL_PATH);
 
   public static final int ACTION_ASYNC_CACHE = 0;
@@ -241,8 +241,9 @@ public class MetaCache {
   }
 
   public static void setStatus(String path, URIStatus s) {
-    /* if (!attrCacheEnabled || s.isFolder() || s.getBlockSizeBytes() == 0
-        || s.getLength() == 0 || s.getInAlluxioPercentage() != 100) return; */
+    if (!attrCacheEnabled || s.isFolder() || s.getBlockSizeBytes() == 0
+        || s.getLength() == 0 || s.getInAlluxioPercentage() != 100
+        || !s.isCompleted() || !s.isPersisted()) return;
 
     path = resolve(path);
     MetaCacheData c = fcache.getIfPresent(path);

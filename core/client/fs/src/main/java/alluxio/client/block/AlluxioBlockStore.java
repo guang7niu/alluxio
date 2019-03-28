@@ -78,14 +78,6 @@ public final class AlluxioBlockStore {
   /** The policy to refresh workers list. */
   private final RefreshPolicy mWorkerRefreshPolicy;
 
-  private static List<String> mWriteHosts = null;   // SM
-  {
-      String hosts = System.getenv("QINIU_WRITER_HOSTS");
-      if (hosts != null) mWriteHosts = Arrays.asList(hosts.split("\\s*,\\s*"));
-      if (mWriteHosts == null) mWriteHosts = new ArrayList<String>();
-  }
-
-
   /**
    * Creates an Alluxio block store with default local hostname.
    *
@@ -202,13 +194,6 @@ public final class AlluxioBlockStore {
         throw new UnavailableException(
             "No Alluxio worker available. Check that your workers are still running");
       }
-      // SM
-      Set<WorkerNetAddress> subPool = workerPool.stream()
-        .filter(w -> blockWorkers.contains(w) || Objects.equals(w, localWorker) ||
-            (!mWriteHosts.contains(w.getHost() + ":" + w.getDataPort())
-             && w.getWebPort() < MetaCache.LOCAL_WORKER_PORT_MIN))
-        .collect(toSet());
-      if (!failedWorkers.keySet().containsAll(subPool)) workerPool = subPool;
     } else {
       workerPool = locations.stream().map(BlockLocation::getWorkerAddress).collect(toSet());
     }

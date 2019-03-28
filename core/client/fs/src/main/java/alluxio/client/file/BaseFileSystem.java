@@ -16,7 +16,6 @@ import static java.util.stream.Collectors.toMap;
 
 import alluxio.AlluxioURI;
 import alluxio.Constants;
-import alluxio.MetaCache;
 import alluxio.annotation.PublicApi;
 import alluxio.client.block.AlluxioBlockStore;
 import alluxio.client.block.BlockWorkerInfo;
@@ -24,7 +23,6 @@ import alluxio.client.file.options.InStreamOptions;
 import alluxio.client.file.options.OutStreamOptions;
 import alluxio.conf.AlluxioConfiguration;
 import alluxio.conf.PropertyKey;
-import alluxio.client.block.BlockMasterClient;
 import alluxio.exception.AlluxioException;
 import alluxio.exception.DirectoryNotEmptyException;
 import alluxio.exception.ExceptionMessage;
@@ -56,23 +54,21 @@ import alluxio.grpc.SetAclPOptions;
 import alluxio.grpc.SetAttributePOptions;
 import alluxio.grpc.UnmountPOptions;
 import alluxio.grpc.AsyncCacheRequest;
-import alluxio.grpc.OpenFilePOptions;
 import alluxio.master.MasterInquireClient;
 import alluxio.security.authorization.AclEntry;
 import alluxio.uri.Authority;
 import alluxio.util.FileSystemOptions;
+import alluxio.wire.BlockLocation;
 import alluxio.wire.FileBlockInfo;
 import alluxio.wire.BlockInfo;
 import alluxio.wire.MountPointInfo;
 import alluxio.wire.SyncPointInfo;
-import alluxio.client.file.URIStatus;
-import alluxio.wire.TieredIdentity;
 import alluxio.wire.WorkerNetAddress;
-import alluxio.network.TieredIdentityFactory;
-import alluxio.util.network.NetworkAddressUtils;
-import alluxio.wire.BlockLocation;
-import alluxio.resource.CloseableResource;
 import alluxio.client.block.stream.BlockWorkerClient;
+import alluxio.proto.dataserver.Protocol;
+import alluxio.resource.CloseableResource;
+import alluxio.client.block.BlockMasterClient;
+import alluxio.MetaCache;
 
 import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
@@ -84,7 +80,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Iterator;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -99,161 +94,10 @@ public class BaseFileSystem implements FileSystem {
   private static final Logger LOG = LoggerFactory.getLogger(BaseFileSystem.class);
 
   protected final FileSystemContext mFsContext;
-  TieredIdentity mLocalTier;  // SM
   protected final AlluxioBlockStore mBlockStore;
   protected final boolean mCachingEnabled;
 
   private volatile boolean mClosed = false;
-  private long READ_TIMEOUT_MS = 30000;   // SM
-
-  @Override
-  public void startAsyncCache(String file) {  // SM
-    try {
-      URIStatus status = getStatus(new AlluxioURI(file));
-      List<Long> ids = status.getBlockIds();
-      Iterator<Long> it = ids.iterator();
-      while (it.hasNext()) {
-        if (startBlockCache(MetaCache.ACTION_ASYNC_CACHE, it.next(), 
-          (mFsContext.hasLocalWorker() && 1 == ids.size())
-            ? mFsContext.getLocalWorker().getHost() : null, status)) {
-          MetaCache.setStatusExpectMore(file);  // expect more blocks to cache
-        }
-      }
-    } catch (Exception e) { 
-      LOG.error("!!! asyn cache error {}", e.getMessage());
-    }
-  }
-
-  /**
-   * @param action: see cache or purge
-   * @param id: block id
-   * @param worker: worker ip address
-   * @return true: send cache or purge command
-   * Note: use AsyncCacheRequest to do the dirty job
-   */
-  @Override
-  public boolean startBlockCache(int action, long id, String worker, URIStatus status) { // SM
-    boolean rc = false;
-    try {
-      MetaCache.invalidateBlockInfoCache(id);
-      BlockInfo binfo = getBlockInfo(id);
-      List<BlockLocation> locations = binfo.getLocations();
-      List<WorkerNetAddress> workers = locations.stream().map(BlockLocation::getWorkerAddress).collect(toList());
-      Collections.shuffle(workers);
-      List<WorkerNetAddress> workers_remote = workers.stream().
-        filter(w -> w.getWebPort() < MetaCache.LOCAL_WORKER_PORT_MIN).collect(toList());
-      String localHostname = NetworkAddressUtils.getClientHostName(mFsContext.getConf());
-      List<WorkerNetAddress> all = mBlockStore.getAllWorkers().stream().map(BlockWorkerInfo::getNetAddress).collect(toList());
-      List<WorkerNetAddress> local = all.stream().filter(w -> w.getHost().equals(localHostname)).collect(toList());
-      if (!local.isEmpty()) all = local;
-      Collections.shuffle(all);
-      List<WorkerNetAddress> all_remote = all.stream().
-        filter(w -> w.getWebPort() < MetaCache.LOCAL_WORKER_PORT_MIN).collect(toList());
-      WorkerNetAddress tgt = null, src = null;
-      List<WorkerNetAddress> out;
-      switch (action) {
-        case MetaCache.ACTION_X_CACHE_REMOTE_EXISTED:          // remove if "remote" existed
-          if (workers_remote.isEmpty()) {
-            break;
-          }
-          // FALL_THRU
-        case MetaCache.ACTION_X_CACHE:
-          out = (worker == null) ? workers : workers.stream().filter(w -> w.getHost().equals(worker)).collect(toList());
-          Iterator<WorkerNetAddress> it = out.iterator();
-          while (it.hasNext()) {
-            tgt = it.next();
-            AsyncCacheRequest request =
-              AsyncCacheRequest.newBuilder().setBlockId(id).setLength(0).build();
-            LOG.info("!!! X block cache id {} on {}", id, tgt.getHost());
-            BlockWorkerClient blockWorker = mFsContext.acquireBlockWorkerClient(tgt);
-            try {
-              blockWorker.asyncCache(request);
-              rc = true;
-            } finally {
-              mFsContext.releaseBlockWorkerClient(tgt, blockWorker);
-            }
-          }
-          break;
-        case MetaCache.ACTION_ASYNC_CACHE:
-          // if worker is not null, cache on worker, otherwise, on an remote worker
-          if (worker == null) {
-            if (workers_remote.isEmpty() && !all_remote.isEmpty()) {
-              tgt = all_remote.get(0);
-              src = workers.isEmpty() ? tgt : workers.get(0);
-            }
-          } else {
-            out = all.stream().filter(w -> w.getHost().equals(worker)).collect(toList());
-            if (!out.isEmpty() && !workers.containsAll(out)) {
-              tgt = out.get(0);
-              src = workers.isEmpty() ? tgt : workers.get(0);
-            }
-          }
-          LOG.debug("!!! block cache id {} on {} from {}", id, tgt, src);
-          if (tgt != null && src != null) {
-            InStreamOptions sopt = new InStreamOptions(status, OpenFilePOptions.getDefaultInstance(), mFsContext.getConf());
-            AsyncCacheRequest request =
-              AsyncCacheRequest.newBuilder().setBlockId(id).setLength(binfo.getLength())
-              .setOpenUfsBlockOptions(sopt.getOpenUfsBlockOptions(id))
-              .setSourceHost(src.getHost()).setSourcePort(src.getDataPort()).build();
-            LOG.info("!!! block cache id {} on {} from {}", id, tgt.getHost(), src.getHost());
-            BlockWorkerClient blockWorker = mFsContext.acquireBlockWorkerClient(tgt);
-            try {
-              LOG.info("!!! X block cache id {} on {}", id, tgt.getHost());
-              blockWorker.asyncCache(request);
-              rc = true;
-            } finally {
-              mFsContext.releaseBlockWorkerClient(tgt, blockWorker);
-            }
-          }
-          break;
-        default:
-          break;
-      }
-    } catch (Exception e) {
-      LOG.error("!!! drain block cache error {}", e.getMessage());
-    }
-    return rc;
-  }
-
-  @Override
-  public String acquireShortCircuitPath(String file) { // SM
-    String localPath = "null";
-    try {
-      URIStatus s = getStatus(new AlluxioURI(file));
-      List<Long> ids = s.getBlockIds();
-      if (s.getLength() > s.getBlockSizeBytes() || ids.size() != 1) {
-        return localPath;
-      }
-      List<WorkerNetAddress> local = Collections.EMPTY_LIST;
-      if (MetaCache.localBlockExisted(ids.get(0))) {
-        local = getBlockInfo(ids.get(0)).getLocations().stream().map(BlockLocation::getWorkerAddress)
-          .filter(w -> w.getHost().equals(mLocalTier.getTier(0).getValue())).collect(toList());
-        if (local.isEmpty()) {  // block there but meta data missed
-          MetaCache.invalidate(file);
-          s = getStatus(new AlluxioURI(file));
-          ids = s.getBlockIds();
-          if (s.getLength() > s.getBlockSizeBytes() || ids.size() != 1) {
-            return localPath;
-          }
-          local = getBlockInfo(ids.get(0)).getLocations().stream().map(BlockLocation::getWorkerAddress)
-            .filter(w -> w.getHost().equals(mLocalTier.getTier(0).getValue())).collect(toList());
-        }
-        if (!local.isEmpty()) {
-          localPath = MetaCache.localBlockPath(ids.get(0));
-        }
-      }
-    } catch (Exception e) { 
-      LOG.error("!!! sc: {}",  e.getMessage());
-    }
-    return localPath;
-  }
-
-  public BlockInfo getBlockInfo(long blockId) throws IOException {  // SM
-    try (CloseableResource<BlockMasterClient> masterClientResource =
-        mFsContext.acquireBlockMasterClientResource()) {
-      return masterClientResource.get().getBlockInfo(blockId);
-    }
-  }
 
   /**
    * @param context the {@link FileSystemContext} to use for client operations
@@ -282,10 +126,6 @@ public class BaseFileSystem implements FileSystem {
     mFsContext = fsContext;
     mBlockStore = AlluxioBlockStore.create(fsContext);
     mCachingEnabled = cachingEnabled;
-
-    // SM
-    mLocalTier = TieredIdentityFactory.localIdentity(mFsContext.getConf());
-    READ_TIMEOUT_MS = getConf().getMs(PropertyKey.UNDERFS_OBJECT_STORE_READ_RETRY_MAX_SLEEP_MS);
   }
 
   /**
@@ -904,4 +744,78 @@ public class BaseFileSystem implements FileSystem {
     }
     return;
   }
+
+  // SM
+  public void asyncCache(String file) {
+    try {
+      URIStatus status = getStatus(new AlluxioURI(file));
+      WorkerNetAddress worker;
+      if (mFsContext.hasLocalWorker() && 1 == status.getBlockIds().size()) {
+        worker = mFsContext.getLocalWorker();
+      } else {
+        List<BlockWorkerInfo> workers = mBlockStore.getEligibleWorkers();
+        Collections.shuffle(workers);
+        worker = workers.get(0).getNetAddress();
+      }
+      for (FileBlockInfo fbInfo: status.getFileBlockInfos()) {
+        BlockInfo bInfo = fbInfo.getBlockInfo();
+        AsyncCacheRequest request =
+          AsyncCacheRequest.newBuilder().setBlockId(bInfo.getBlockId()).setLength(bInfo.getLength())
+          .setOpenUfsBlockOptions(Protocol.OpenUfsBlockOptions.getDefaultInstance())
+          .setSourceHost(worker.getHost()).setSourcePort(worker.getDataPort()).build();
+        BlockWorkerClient blockWorker = mFsContext.acquireBlockWorkerClient(worker);
+        try {
+          blockWorker.asyncCache(request);
+        } finally {
+          mFsContext.releaseBlockWorkerClient(worker, blockWorker);
+        }
+      } // for
+    } catch (Exception e) { 
+      LOG.error("!!! asyn cache error {}", e.getMessage());
+    }
+  }
+
+  private long hasSCId(String file) throws Exception {
+    URIStatus s = getStatus(new AlluxioURI(file));
+    List<Long> ids = s.getBlockIds();
+    return (s.getLength() > s.getBlockSizeBytes() || ids.size() != 1) ? 0 : ids.get(0);
+  }
+
+  private boolean inLocalWorker(long id) {
+    CloseableResource<BlockMasterClient> client = null;
+    try {
+      if (!mFsContext.hasLocalWorker()) return false;
+      client = mFsContext.acquireBlockMasterClientResource();
+      WorkerNetAddress lw = mFsContext.getLocalWorker();
+      List<WorkerNetAddress> local = client.get()
+        .getBlockInfo(id).getLocations().stream().map(BlockLocation::getWorkerAddress)
+        .filter(w -> w.getHost().equals(lw.getHost())).collect(toList());
+      return local.isEmpty() ? false : true;
+    } catch (Exception e) {
+      return false;
+    } finally {
+      if (client != null) client.close();
+    }
+  }
+
+  public String acquireShortCircuitPath(String file) {
+    String localPath = "null";
+    try {
+      long id = hasSCId(file);
+      if (0 == id) return localPath;
+      if (MetaCache.localBlockExisted(id)) {
+        boolean inLocal = inLocalWorker(id);
+        if (!inLocal) {  // block there but meta data missed
+          MetaCache.invalidate(file);
+        }
+        if (inLocal || inLocalWorker(id)) {
+          localPath = MetaCache.localBlockPath(id);
+        }
+      } // if
+    } catch (Exception e) { 
+      LOG.error("!!! sc: {}",  e.getMessage());
+    }
+    return localPath;
+  }
+
 }

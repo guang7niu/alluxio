@@ -33,6 +33,10 @@ public interface ReadOnlyInodeStore extends Closeable {
    */
   long estimateSize();
 
+  default long estimateSize(int column) {  // SM
+    return 0;
+  }
+
   /**
    * @param id an inode id
    * @return the inode with the given id, if it exists
@@ -161,6 +165,11 @@ public interface ReadOnlyInodeStore extends Closeable {
    */
   @VisibleForTesting
   Set<MutableInode<?>> allInodes();
+
+  // SM
+  default Set<byte[]> numInodes(int column, int num, boolean random) {
+    return java.util.Collections.EMPTY_SET;
+  }
 
   @Override
   default void close() {

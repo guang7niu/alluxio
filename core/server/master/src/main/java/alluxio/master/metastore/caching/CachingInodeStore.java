@@ -4,6 +4,7 @@
  * available at www.apache.org/licenses/LICENSE-2.0
  *
  * This software is distributed on an "AS IS" basis, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+import alluxio.master.metastore.heap.HeapInodeStore;
  * either express or implied, as more fully set forth in the License.
  *
  * See the NOTICE file distributed with this work for information regarding copyright ownership.
@@ -33,6 +34,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Sets;
 import com.google.common.io.Closer;
+import com.google.common.primitives.Longs;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -104,6 +106,10 @@ public final class CachingInodeStore implements InodeStore, Closeable {
   // backing store.
   private volatile boolean mBackingStoreEmpty;
 
+  // SM
+  private CacheConfiguration mCacheConf;
+  private final int BACKING_RATIO;
+
   /**
    * @param backingStore the backing inode store
    * @param args inode store args
@@ -127,14 +133,16 @@ public final class CachingInodeStore implements InodeStore, Closeable {
         PropertyKey.MASTER_METASTORE_INODE_CACHE_HIGH_WATER_MARK_RATIO, highWaterMarkRatio);
     int lowWaterMark = Math.round(maxSize * lowWaterMarkRatio);
 
+    BACKING_RATIO = conf.getInt(PropertyKey.MASTER_METASTORE_INODE_CACHE_BACKING_RATIO);  // SM
+
     mBackingStoreEmpty = true;
-    CacheConfiguration cacheConf = CacheConfiguration.newBuilder().setMaxSize(maxSize)
+    mCacheConf = CacheConfiguration.newBuilder().setMaxSize(maxSize)    // SM
         .setHighWaterMark(highWaterMark).setLowWaterMark(lowWaterMark)
         .setEvictBatchSize(conf.getInt(PropertyKey.MASTER_METASTORE_INODE_CACHE_EVICT_BATCH_SIZE))
         .build();
-    mInodeCache = new InodeCache(cacheConf);
-    mEdgeCache = new EdgeCache(cacheConf);
-    mListingCache = new ListingCache(cacheConf);
+    mInodeCache = new InodeCache(mCacheConf);       // SM
+    mEdgeCache = new EdgeCache(mCacheConf);         // SM
+    mListingCache = new ListingCache(mCacheConf);   // SM
   }
 
   @Override
@@ -264,6 +272,20 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       if (!mBackingStoreEmpty) {
         mBackingStore.remove(key);
       }
+    }
+
+    @Override
+    protected boolean tickle() {   // SM return: under watermark?
+      long size = mBackingStore.estimateSize(); 
+      if (size >= mCacheConf.getMaxSize() * BACKING_RATIO) {
+        Set<byte[]> ids = mBackingStore.numInodes(0, mCacheConf.getEvictBatchSize() * BACKING_RATIO, true);
+        LOG.info(" === trying remove {} backing store indoes", ids.size());
+        for (byte[] bytes: ids) {
+          remove(Longs.fromByteArray(bytes));
+        }
+        if (size - ids.size() >= mCacheConf.getLowWaterMark()  * BACKING_RATIO) return false;
+      }
+      return true;
     }
 
     @Override
@@ -561,10 +583,14 @@ public final class CachingInodeStore implements InodeStore, Closeable {
     private Map<Long, ListingCacheEntry> mMap = new ConcurrentHashMap<>();
     private Iterator<Map.Entry<Long, ListingCacheEntry>> mEvictionHead = mMap.entrySet().iterator();
 
+    // SM - avoid big dir flush out cache
+    private final int mMaxDirEntries;
+
     private ListingCache(CacheConfiguration conf) {
       mMaxSize = conf.getMaxSize();
       mHighWaterMark = conf.getHighWaterMark();
       mLowWaterMark = conf.getLowWaterMark();
+      mMaxDirEntries = mMaxSize / 100 * 10;  // SM
       MetricsSystem.registerGaugeIfAbsent(MetricsSystem.getMetricName("listing-cache-size"),
           () -> mWeight.get());
     }
@@ -667,7 +693,7 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       mMap.computeIfPresent(inodeId, (key, value) -> {
         // Perform the update inside computeIfPresent to prevent concurrent modification to the
         // cache entry.
-        if (!entry.mModified) {
+        if (!entry.mModified && listing.size() < mMaxDirEntries) {    // SM
           entry.mChildren = new ConcurrentHashMap<>(listing);
           mWeight.addAndGet(weight(entry));
           return entry;
@@ -734,6 +760,14 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       private volatile Map<String, Long> mChildren = null;
 
       public void addChild(String name, Long id) {
+        // SM
+        if (mChildren != null && mChildren.size() >= mMaxDirEntries) {
+          mWeight.addAndGet(-mChildren.size());
+          mModified = true;
+          mChildren = null;
+          return;
+        }
+
         if (mChildren != null && mChildren.put(name, id) == null) {
           mWeight.incrementAndGet();
         }

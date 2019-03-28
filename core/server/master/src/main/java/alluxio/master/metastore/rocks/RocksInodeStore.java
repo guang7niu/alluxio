@@ -255,6 +255,39 @@ public class RocksInodeStore implements InodeStore {
   }
 
   @Override
+  public long estimateSize(int column) {  // SM
+    if (column > 2 || column < 0) return 0;
+    ColumnFamilyHandle col = (column == 0) ? mInodesColumn : mEdgesColumn;
+    try {
+      return Long.parseLong(mDb.getProperty(col, "rocksdb.estimate-num-keys"));
+    } catch (RocksDBException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  @Override
+  public Set<byte[]> numInodes(int column, int num, boolean random) {  // SM
+    long size = estimateSize(column);
+    if (size <= 0) return java.util.Collections.EMPTY_SET;
+    ColumnFamilyHandle col = (column == 0) ? mInodesColumn : mEdgesColumn;
+    RocksIterator it = mDb.newIterator(col);
+    it.seekToFirst();
+    if (random) {
+      int at = (new java.util.Random()).nextInt((int)size);
+      for (; it.isValid() && at > 0; at--) {
+        it.next();
+      }
+      if (!it.isValid()) it.seekToFirst();
+    }
+    Set<byte[]> ret = new HashSet<byte[]>();
+    for (; it.isValid() && num > 0; num--) {
+      ret.add(it.key());
+      it.next();
+    }
+    return ret;
+  }
+
+  @Override
   public boolean supportsBatchWrite() {
     return true;
   }

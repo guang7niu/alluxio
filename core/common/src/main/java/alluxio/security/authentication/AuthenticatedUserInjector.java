@@ -74,6 +74,7 @@ public final class AuthenticatedUserInjector implements ServerInterceptor {
     // Try to fetch channel Id from the metadata.
     UUID channelId = headers.get(ChannelIdInjector.S_CLIENT_ID_KEY);
     boolean callAuthenticated = false;
+    //if (channelId == null) channelId = UUID.fromString("efea9c20-4f0b-11e9-855c-0242ac120032");  // SM
     if (channelId != null) {
       try {
         // Fetch authenticated username for this channel and set it.
