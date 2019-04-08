@@ -3439,6 +3439,13 @@ public final class PropertyKey implements Comparable<PropertyKey> {
           .setConsistencyCheckLevel(ConsistencyCheckLevel.WARN)
           .setScope(Scope.WORKER)
           .build();
+  public static final PropertyKey LS_MAX_ENTRY =    // SM
+      new Builder(Name.LS_MAX_ENTRY)
+          .setDefaultValue(10000)
+          .setDescription("The maximum number of files to list one time.")
+          .setConsistencyCheckLevel(ConsistencyCheckLevel.ENFORCE)
+          .setScope(Scope.MASTER)
+          .build();
 
   /**
    * @param fullyQualifiedClassname a fully qualified classname
@@ -4135,6 +4142,7 @@ public final class PropertyKey implements Comparable<PropertyKey> {
     public static final String WORKER_JVM_MONITOR_ENABLED = "alluxio.worker.jvm.monitor.enabled";
 
     public static final String WORKER_LOCAL_PATH = "alluxio.worker.local.path";     // SM
+    public static final String LS_MAX_ENTRY = "alluxio.master.ls.max.entry";     // SM
 
     private Name() {} // prevent instantiation
   }

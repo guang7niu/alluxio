@@ -10,4 +10,6 @@ enum LoadDescendantPType {
     NONE = 0;
     ONE = 1;
     ALL = 2;
+    // SM
+    ONE_QUICK = 3;
 }

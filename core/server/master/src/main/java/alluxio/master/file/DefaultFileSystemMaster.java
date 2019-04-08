@@ -55,6 +55,7 @@ import alluxio.grpc.MountPOptions;
 import alluxio.grpc.ServiceType;
 import alluxio.grpc.SetAclAction;
 import alluxio.grpc.SetAttributePOptions;
+import alluxio.grpc.TtlAction;
 import alluxio.heartbeat.HeartbeatContext;
 import alluxio.heartbeat.HeartbeatThread;
 import alluxio.master.CoreMaster;
@@ -134,6 +135,7 @@ import alluxio.underfs.Fingerprint;
 import alluxio.underfs.Fingerprint.Tag;
 import alluxio.underfs.MasterUfsManager;
 import alluxio.underfs.UfsFileStatus;
+import alluxio.underfs.UfsDirectoryStatus;
 import alluxio.underfs.UfsManager;
 import alluxio.underfs.UfsMode;
 import alluxio.underfs.UfsStatus;
@@ -327,6 +329,8 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
 
   /** Store for holding inodes. */
   private final ReadOnlyInodeStore mInodeStore;
+  private final InodeStore mVolatileInodeStore;    // SM
+  private static final String MARKER_NEXT = "@marker next: ls @";
 
   /** This manages inode locking. */
   private final InodeLockManager mInodeLockManager;
@@ -408,6 +412,7 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
     InodeStore inodeStore = masterContext.getInodeStoreFactory()
         .apply(new InodeStoreArgs(mInodeLockManager, ServerConfiguration.global()));
     mInodeStore = new DelegatingReadOnlyInodeStore(inodeStore);
+    mVolatileInodeStore = inodeStore;  // SM
     mInodeTree = new InodeTree(inodeStore, mBlockMaster,
         mDirectoryIdGenerator, mMountTable, mInodeLockManager);
 
@@ -940,6 +945,8 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
       DescendantType loadDescendantType;
       if (context.getOptions().getLoadMetadataType() == LoadMetadataPType.NEVER) {
         loadDescendantType = DescendantType.NONE;
+      } else if (context.getOptions().getLoadMetadataType() == LoadMetadataPType.QUICK) {   // SM
+        loadDescendantType = DescendantType.ONE_QUICK;
       } else if (context.getOptions().getRecursive()) {
         loadDescendantType = DescendantType.ALL;
       } else {
@@ -952,6 +959,10 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
               .setCommonOptions(FileSystemMasterCommonPOptions.newBuilder()
                   .setTtl(context.getOptions().getCommonOptions().getTtl())
                   .setTtlAction(context.getOptions().getCommonOptions().getTtlAction())));
+
+      // SM
+      if (context.getOptions().hasMarker()) loadMetadataContext.setMarker(context.getOptions().getMarker());
+
       Inode inode;
       if (inodePath.fullPathExists()) {
         inode = inodePath.getInode();
@@ -979,11 +990,29 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
       List<FileInfo> ret = new ArrayList<>();
       DescendantType descendantTypeForListStatus = (context.getOptions().getRecursive())
           ? DescendantType.ALL : DescendantType.ONE;
-      listStatusInternal(inodePath, auditContext, descendantTypeForListStatus, ret);
+      if (loadMetadataContext.getOptions().getLoadDescendantType() == LoadDescendantPType.ONE_QUICK) {  // SM
+        if (loadMetadataContext.getQuickDirInfo() != null) {
+          for (UfsStatus s: loadMetadataContext.getQuickDirInfo()) {
+            ret.add(new FileInfo().setFileId(0).setName(s.getName()).setFolder(s.isDirectory())
+              .setLastModificationTimeMs(s.getLastModifiedTime()).setTtlAction(TtlAction.DELETE)
+              .setCompleted(true)); //.setMode(Constants.DEFAULT_FILE_SYSTEM_MODE));
+          }
+          LOG.debug("SMLS: load {} quick info for {}", loadMetadataContext.getQuickDirInfo().size(), path.getPath());
+          if (inode.isDirectory()) ret.add(getFileInfoInternal(inodePath));     // last one is dir
+        } else {
+          LOG.error("SMLS: load metadata quick info should be valid {}", path);
+        }
+      } else  {
+        listStatusInternal(inodePath, auditContext, descendantTypeForListStatus, ret);
+      }
 
       // If we are listing the status of a directory, we remove the directory info that we inserted
       if (inode.isDirectory() && ret.size() >= 1) {
         ret.remove(ret.size() - 1);
+      }
+      
+      if (loadMetadataContext.getOutMarker() != null && loadMetadataContext.getOutMarker().length() > 0g {  // SM
+        ret.add(MetaCache.file2Status(MARKER_NEXT + loadMetadataContext.getOutMarker()).getFileInfo());
       }
 
       auditContext.setSucceeded(true);
@@ -2448,6 +2477,11 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
           } else {
             listOptions.setRecursive(false);
           }
+
+          // SM
+          if (context.getMarker() != null) listOptions.setMarker(context.getMarker());
+          listOptions.setMaxSize(MetaCache.LS_MAX_ENTRY); 
+
           UfsStatus[] children = ufs.listStatus(ufsUri.toString(), listOptions);
           // children can be null if the pathname does not denote a directory
           // or if the we do not have permission to listStatus on the directory in the ufs.
@@ -2456,6 +2490,28 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
                 + ufsUri.toString());
           }
           Arrays.sort(children, Comparator.comparing(UfsStatus::getName));
+
+          // SM
+          context.setOutMarker(listOptions.getOutMarker());
+          boolean isBigDir = (context.getMarker() != null && context.getMarker().length() > 0)
+            || (children.length >= MetaCache.LS_MAX_ENTRY);
+          if (isBigDir) mVolatileInodeStore.bigDir(inodePath.getInode().getId());
+          if (context.getOptions().getLoadDescendantType() == LoadDescendantPType.ONE_QUICK) {
+            List<UfsStatus> qinfo = new ArrayList<>();
+            for (UfsStatus s: children) {
+              if (PathUtils.isTemporaryFileName(s.getName())) continue;
+              qinfo.add(s);
+            }
+            /*if (isBigDir && listOptions.getOutMarker() != null && listOptions.getOutMarker().length() > 0) {
+              qinfo.add(new UfsDirectoryStatus(MARKER_NEXT + listOptions.getOutMarker(), 
+                    "", "", Constants.DEFAULT_FILE_SYSTEM_MODE, System.currentTimeMillis()));
+            }*/
+            context.setQuickDirInfo(qinfo);
+            LOG.debug("SMLS: get {} quickinfo for {}", qinfo.size(), path);
+            return;
+          }
+          boolean allLoaded = (context.getMarker() == null || context.getMarker().length() == 0
+            || children.length < MetaCache.LS_MAX_ENTRY);
 
           for (UfsStatus childStatus : children) {
             if (PathUtils.isTemporaryFileName(childStatus.getName())) {
@@ -2489,13 +2545,14 @@ public final class DefaultFileSystemMaster extends CoreMaster implements FileSys
                     loadMetadataContext, e);
                 continue;
               }
+              /* SM
               if (context.getOptions().getLoadDescendantType() == LoadDescendantPType.ALL
                   && descendant.getInode().isDirectory()) {
                 mInodeTree.setDirectChildrenLoaded(rpcContext, descendant.getInode().asDirectory());
-              }
+              }*/
             }
           }
-          mInodeTree.setDirectChildrenLoaded(rpcContext, inodePath.getInode().asDirectory());
+          if (allLoaded) mInodeTree.setDirectChildrenLoaded(rpcContext, inodePath.getInode().asDirectory()); // SM
         }
       }
     } catch (IOException e) {

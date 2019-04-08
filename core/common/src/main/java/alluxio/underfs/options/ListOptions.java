@@ -27,6 +27,32 @@ public final class ListOptions {
   // Whether to list a directory and all its sub-directories
   private boolean mRecursive;
 
+  // SM
+  private String mMarker = null;
+  public ListOptions setMarker(String marker) {
+    mMarker = marker;
+    return this;
+  }
+  public String getMarker() {
+    return mMarker;
+  }
+  private String mOutMarker = null;
+  public ListOptions setOutMarker(String marker) {
+    mOutMarker = marker;
+    return this;
+  }
+  public String getOutMarker() {
+    return mOutMarker;
+  }
+  private long mMaxSize = 0;
+  public ListOptions setMaxSize(long max) {
+    mMaxSize = max;
+    return this;
+  }
+  public long getMaxSize() {
+    return mMaxSize;
+  }
+
   /**
    * @return the default {@link ListOptions}
    */

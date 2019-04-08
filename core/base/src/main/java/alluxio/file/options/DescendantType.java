@@ -21,4 +21,6 @@ public enum DescendantType {
   ONE,
   /** Process all descendants. */
   ALL,
+  /** Process only 1 level of children but quick. SM */
+  ONE_QUICK,
 }

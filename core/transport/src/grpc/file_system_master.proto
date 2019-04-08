@@ -28,6 +28,7 @@ enum LoadMetadataPType {
   NEVER = 0;  // Never load metadata.
   ONCE = 1;  // Load metadata only once.
   ALWAYS = 2;  // Always load metadata.
+  QUICK = 3;   // only name, not getStatus again  SM
 }
 
 message FileSystemMasterCommonPOptions {
@@ -180,6 +181,8 @@ message ListStatusPOptions {
   optional LoadMetadataPType loadMetadataType = 2;
   optional FileSystemMasterCommonPOptions commonOptions = 3;
   optional bool recursive = 4;
+  // SM
+  optional string marker = 5;
 }
 message ListStatusPRequest {
   /** the path of the file or directory */

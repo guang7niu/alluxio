@@ -51,7 +51,7 @@ set_java_opt() {
   "
 
   ALLUXIO_FUSE_JAVA_OPTS=${ALLUXIO_JAVA_OPTS}
-  ALLUXIO_FUSE_JAVA_OPTS+=" -Dalluxio.logger.type=FUSE_LOGGER"
+  ALLUXIO_FUSE_JAVA_OPTS+=" -Dalluxio.logger.type=FUSE_LOGGER -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=6609"
 }
 
 mount_fuse() {

@@ -16,6 +16,8 @@ import alluxio.grpc.LoadMetadataPOptions;
 import alluxio.underfs.UfsStatus;
 import alluxio.util.FileSystemOptions;
 
+import java.util.List;
+
 import com.google.common.base.MoreObjects;
 
 /**
@@ -24,6 +26,32 @@ import com.google.common.base.MoreObjects;
 public class LoadMetadataContext extends OperationContext<LoadMetadataPOptions.Builder> {
 
   private UfsStatus mUfsStatus;
+
+  // SM
+  private String mMarker = null;
+  public String getMarker() {
+    return mMarker;
+  }
+  public LoadMetadataContext setMarker(String marker) {
+    mMarker = marker;
+    return this;
+  }
+  private String mOutMarker = null;
+  public String getOutMarker() {
+    return mOutMarker;
+  }
+  public LoadMetadataContext setOutMarker(String marker) {
+    mOutMarker = marker;
+    return this;
+  }
+  private List<UfsStatus> mQuickDirInfo = null;
+  public List<UfsStatus> getQuickDirInfo() {
+    return mQuickDirInfo;
+  }
+  public LoadMetadataContext setQuickDirInfo(List<UfsStatus> qinfo) {
+    mQuickDirInfo = qinfo;
+    return this;
+  }
 
   /**
    * Creates context with given option data.

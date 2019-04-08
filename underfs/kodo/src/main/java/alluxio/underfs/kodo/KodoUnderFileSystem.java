@@ -19,6 +19,7 @@ import alluxio.underfs.ObjectUnderFileSystem;
 import alluxio.underfs.UnderFileSystem;
 import alluxio.underfs.UnderFileSystemConfiguration;
 import alluxio.underfs.options.OpenOptions;
+import alluxio.underfs.options.ListOptions;
 import alluxio.util.UnderFileSystemUtils;
 import alluxio.util.io.PathUtils;
 
@@ -158,7 +159,7 @@ public class KodoUnderFileSystem extends ObjectUnderFileSystem {
     String delimiter = recursive ? "" : PATH_SEPARATOR;
     key = PathUtils.normalizePath(key, PATH_SEPARATOR);
     key = key.equals(PATH_SEPARATOR) ? "" : key;
-    FileListing result = getObjectListingChunk(key, getListingChunkLength(mAlluxioConf), delimiter);
+    FileListing result = getObjectListingChunk(key, null, getListingChunkLength(mAlluxioConf), delimiter);  // SM
     if (result != null) {
       return new KodoObjectListingChunk(result, getListingChunkLength(mAlluxioConf), delimiter,
           key);
@@ -166,9 +167,26 @@ public class KodoUnderFileSystem extends ObjectUnderFileSystem {
     return null;
   }
 
-  private FileListing getObjectListingChunk(String prefix, int limit, String delimiter) {
+  @Nullable
+  @Override     // SM
+  protected ObjectListingChunk getObjectListingChunk(String key, ListOptions options)
+      throws IOException {
+    String delimiter = options.isRecursive() ? "" : PATH_SEPARATOR;
+    key = PathUtils.normalizePath(key, PATH_SEPARATOR);
+    key = key.equals(PATH_SEPARATOR) ? "" : key;
+    int limit = getListingChunkLength(mAlluxioConf);
+    if (options.getMaxSize() > 0 && limit > options.getMaxSize()) limit = (int)options.getMaxSize();
+    FileListing result = getObjectListingChunk(key, options.getMarker(), limit + 1, delimiter);  // SM
+    if (result != null) {
+      return new KodoObjectListingChunk(result, limit, delimiter,
+          key);
+    }
+    return null;
+  }
+
+  private FileListing getObjectListingChunk(String prefix, String marker, int limit, String delimiter) {     // SM
     try {
-      return mKodoClinet.listFiles(prefix, null, limit, delimiter);
+      return mKodoClinet.listFiles(prefix, marker, limit, delimiter);  // SM
     } catch (QiniuException e) {
       LOG.error("list objects failed ,Msg:{}", e);
       return null;
@@ -236,6 +254,11 @@ public class KodoUnderFileSystem extends ObjectUnderFileSystem {
       mDelimiter = delimiter;
       mResult = result;
       mPrefix = prefix;
+    }
+
+    @Override
+    public String getMarker() {   // SM
+      return (mResult == null) ? "": mResult.marker;
     }
 
     /**

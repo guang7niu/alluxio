@@ -33,6 +33,8 @@ public enum LoadMetadataType {
    * Always load metadata when listing status on a directory.
    */
   ALWAYS(2),
+  // SM
+  QUICK(3),
   ;
 
   private final int mValue;

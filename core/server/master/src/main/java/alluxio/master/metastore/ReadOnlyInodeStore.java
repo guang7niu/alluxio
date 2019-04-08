@@ -33,8 +33,10 @@ public interface ReadOnlyInodeStore extends Closeable {
    */
   long estimateSize();
 
-  default long estimateSize(int column) {  // SM
-    return 0;
+  // SM
+  default long estimateSize(int column) { return 0; }
+  default Set<byte[]> numInodes(int column, int num, boolean random) {
+    return java.util.Collections.EMPTY_SET;
   }
 
   /**
@@ -165,11 +167,6 @@ public interface ReadOnlyInodeStore extends Closeable {
    */
   @VisibleForTesting
   Set<MutableInode<?>> allInodes();
-
-  // SM
-  default Set<byte[]> numInodes(int column, int num, boolean random) {
-    return java.util.Collections.EMPTY_SET;
-  }
 
   @Override
   default void close() {

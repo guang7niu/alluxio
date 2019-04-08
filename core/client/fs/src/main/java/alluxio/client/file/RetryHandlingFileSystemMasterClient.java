@@ -131,6 +131,7 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
         () -> mClient.createDirectory(CreateDirectoryPRequest.newBuilder()
             .setPath(path.getPath()).setOptions(options).build()),
         "CreateDirectory");
+    MetaCache.addVolatileEntry(path.getPath(), true);   // SM
   }
 
   @Override
@@ -138,6 +139,7 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
       throws AlluxioStatusException {
     retryRPC(() -> mClient.createFile(CreateFilePRequest.newBuilder().setPath(path.getPath())
         .setOptions(options).build()), "CreateFile");
+    MetaCache.addVolatileEntry(path.getPath(), false);   // SM
   }
 
   @Override
@@ -152,6 +154,7 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
       throws AlluxioStatusException {
     retryRPC(() -> mClient.remove(DeletePRequest.newBuilder().setPath(path.getPath())
         .setOptions(options).build()), "Delete");
+    MetaCache.removeVolatileEntry(path.getPath());  // SM
   }
 
   @Override
@@ -215,7 +218,11 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
   @Override
   public List<URIStatus> listStatus(final AlluxioURI path,
       final ListStatusPOptions options) throws AlluxioStatusException {
-    return retryRPC(() -> {
+    if (MetaCache.hasVolatileList(path.getPath())) { // SM
+      return MetaCache.getVolatileList(path.getPath());
+    }
+
+    List<URIStatus> ls = retryRPC(() -> { // SM
       List<URIStatus> result = new ArrayList<>();
       for (alluxio.grpc.FileInfo fileInfo : mClient.listStatus(ListStatusPRequest.newBuilder()
           .setPath(path.getPath()).setOptions(options).build())
@@ -224,6 +231,13 @@ public final class RetryHandlingFileSystemMasterClient extends AbstractMasterCli
       }
       return result;
     }, "ListStatus");
+
+    // SM
+    boolean isBigDir = (options.getMarker() != null && options.getMarker().length() > 0)
+      || (ls.size() >= MetaCache.LS_MAX_ENTRY);
+    MetaCache.addVolatileList(path.getPath(), ls, isBigDir);
+
+    return ls;
   }
 
   @Override

@@ -16,6 +16,7 @@ import alluxio.conf.AlluxioConfiguration;
 import alluxio.conf.InstancedConfiguration;
 import alluxio.conf.PropertyKey;
 import alluxio.client.file.URIStatus;
+import alluxio.wire.FileInfo;
 import alluxio.wire.BlockInfo;
 import alluxio.wire.FileBlockInfo;
 import alluxio.wire.WorkerInfo;
@@ -28,6 +29,7 @@ import com.google.common.cache.LoadingCache;
 
 import java.util.ArrayList;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.List;
@@ -37,6 +39,7 @@ import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
+import static java.util.stream.Collectors.toList;
 
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -65,6 +68,7 @@ public class MetaCache {
 
   public static final int WORKER_PORT_MIN = 50000;
   public static final String WORKER_LOCAL_PATH = conf.get(PropertyKey.WORKER_LOCAL_PATH);
+  public static final long LS_MAX_ENTRY = conf.getLong(PropertyKey.LS_MAX_ENTRY);
 
   public static final int ACTION_ASYNC_CACHE = 0;
   public static final int ACTION_X_CACHE = -1;
@@ -150,6 +154,8 @@ public class MetaCache {
       case 0: 
         attrCacheEnabled = false; 
         fcache.invalidateAll();
+        mWeight.set(0);
+        mDirMap.clear();
         return;
       case 1: 
         attrCacheEnabled = true; 
@@ -218,7 +224,12 @@ public class MetaCache {
   public static URIStatus getStatus(String path) {
     path = resolve(path);
     MetaCacheData c = fcache.getIfPresent(path);
-    return (c == null || c.getExpectMore() > System.currentTimeMillis()) ? null : c.getStatus();
+    URIStatus s = (c == null || c.getExpectMore() > System.currentTimeMillis()) ? null : c.getStatus();
+    if (s != null && s.getFileId() == 0) {
+      c.setStatus(null);  // volatile status work once right after ls
+      LOG.debug("SMLS: unset volatile status for {}", path);
+    }
+    return s;
   }
 
   public static void setStatusExpectMore(String path) {
@@ -240,16 +251,17 @@ public class MetaCache {
     return seta.containsAll(setb);
   }
 
-  public static void setStatus(String path, URIStatus s) {
-    if (!attrCacheEnabled || s.isFolder() || s.getBlockSizeBytes() == 0
-        || s.getLength() == 0 || s.getInAlluxioPercentage() != 100
-        || !s.isCompleted() || !s.isPersisted()) return;
+  public static URIStatus setStatus(String path, URIStatus s) {
+    if (!attrCacheEnabled) return null;
+    if (s.getFileId() != 0 && !s.isFolder() && (s.getBlockSizeBytes() == 0 || s.getLength() == 0 
+          || !s.isCompleted() || !s.isPersisted())) return null;   // always allow folder & volatile status
 
     path = resolve(path);
     MetaCacheData c = fcache.getIfPresent(path);
     long more = (c != null && c.getExpectMore() > System.currentTimeMillis() 
         && !statusContain(s, c.getStatus())) ? c.getExpectMore() : 0;
     c = (c == null) ? fcache.getUnchecked(path) : c;
+    if (c.getStatus() != null && s.getFileId() == 0) return c.getStatus(); // not overwrite with volatile status
     c.setStatus(s);
     if (more > 0) {
       c.setExpectMore(more);
@@ -260,6 +272,7 @@ public class MetaCache {
         setBlockInfo(b.getBlockId(), b);
       }
     }
+    return s;
   }
 
   private static int testLocalPath = -1;
@@ -408,5 +421,114 @@ public class MetaCache {
     }
   }
 
+  static class VolatileEntry {
+    public boolean mIsDirectory;
+    public long mLastModifiedTimeMs;
+    public String mName;
+
+    public VolatileEntry(boolean dir, long ts, String name) {
+      mIsDirectory = dir;
+      mLastModifiedTimeMs = ts;
+      mName = name;
+    }
+  }
+
+  private static AtomicLong mWeight = new AtomicLong(0);
+  private static Map<String, Set<VolatileEntry>> mDirMap = new ConcurrentHashMap<>();
+
+  public static URIStatus file2Status(String name) {
+    return file2Status(name, false, System.currentTimeMillis());
+  }
+  public static URIStatus file2Status(String name, boolean isDir, long ts) {
+    FileInfo info = new FileInfo().setFolder(isDir).setFileId(0).setCompleted(true)
+      .setName(name).setMode(Constants.DEFAULT_FILE_SYSTEM_MODE)
+      .setOwner("root").setGroup("root")
+      .setLastModificationTimeMs(ts).setTtlAction(alluxio.grpc.TtlAction.DELETE);
+    return new URIStatus(info);
+  }
+
+  public static void addVolatileEntry(String path, boolean folder) {
+    int idx = path.lastIndexOf('/');
+    if (idx <= 0) return;
+    String dir = path.substring(0, idx), file = path.substring(idx + 1);
+    Set<VolatileEntry> value = mDirMap.get(dir);
+    if (value != null) {
+      evict();  // if needed
+      
+      value.add(new VolatileEntry(folder, System.currentTimeMillis(), file));
+      mWeight.incrementAndGet();
+    }
+  }
+
+  public static void removeVolatileEntry(String path) {
+    int idx = path.lastIndexOf('/');
+    if (idx <= 0) return;
+    String dir = path.substring(0, idx), file = path.substring(idx + 1);
+    Set<VolatileEntry> value = mDirMap.get(dir);
+    if (value != null) {
+      value.removeIf(s -> s.mName.equals(file));
+      mWeight.decrementAndGet();
+    }
+  }
+
+  private static void evict() {
+    if (mWeight.get() > maxCachedPaths * 10) {
+      for (Map.Entry<String, ?> entry: mDirMap.entrySet()) {
+        if (mWeight.get() < maxCachedPaths * 7) break;
+        removeVolatileList(entry.getKey());
+      }
+    }
+  }
+
+  public static void addVolatileList(String dir, List<URIStatus> children, boolean bigDir) {
+    evict();  // if needed
+    LOG.debug("SMLS: addVolatileList for {} with {} kids bigdir {}", dir, children.size(), bigDir);
+    for (URIStatus s: children) {
+      String key = dir.endsWith("/") ? (dir + s.getName()) : (dir  + "/" + s.getName());
+      MetaCache.setStatus(key, s);
+    }
+    if (bigDir) return;
+
+    Set<VolatileEntry> value = new HashSet<>();
+    for (URIStatus s: children) {
+      value.add(new VolatileEntry(s.isFolder(), s.getLastModificationTimeMs(), s.getName()));
+    }
+
+    if (value.size() > 0) {
+      mDirMap.put(dir, value);
+      mWeight.addAndGet(value.size());
+    }
+  }
+
+  public static void removeVolatileList(String dir) {
+    Set<VolatileEntry> value = mDirMap.get(dir);
+    if (value != null) {
+      LOG.debug("SMLS: removeVolatileList for {} with size {}", dir, value.size());
+      mWeight.addAndGet(-value.size());
+      mDirMap.remove(dir);
+    }
+  }
+
+  public static boolean hasVolatileList(String dir) {
+    return mDirMap.containsKey(dir);
+  }
+
+  /**
+   * for ls with big dir, don't do getStatus for each file, return incomplete info
+   */
+  public static List<URIStatus> getVolatileList(String dir) {
+    Set<VolatileEntry> v = mDirMap.get(dir);
+    List<URIStatus> ret = new ArrayList<>();
+    if (v != null) {
+      for (VolatileEntry e: v) {
+        String key = dir.endsWith("/") ? (dir + e.mName) : (dir  + "/" + e.mName);
+        URIStatus s = file2Status(e.mName, e.mIsDirectory, e.mLastModifiedTimeMs);
+        URIStatus us = MetaCache.setStatus(key, s);
+        ret.add((us == null) ? s : us);
+      }
+      LOG.debug("SMLS: getVolatileList for {} with size {}", dir, ret.size());
+    }
+    return (v == null) ? null : ret;
+  }
 }
 

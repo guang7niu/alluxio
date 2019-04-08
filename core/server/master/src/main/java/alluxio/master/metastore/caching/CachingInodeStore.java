@@ -146,6 +146,11 @@ public final class CachingInodeStore implements InodeStore, Closeable {
   }
 
   @Override
+  public void bigDir(Long inodeId) {
+    mListingCache.bigDir(inodeId);
+  }
+
+  @Override
   public Optional<MutableInode<?>> getMutable(long id) {
     return mInodeCache.get(id);
   }
@@ -276,12 +281,12 @@ public final class CachingInodeStore implements InodeStore, Closeable {
 
     @Override
     protected boolean tickle() {   // SM return: under watermark?
-      long size = mBackingStore.estimateSize(); 
+      long size = mBackingStore.estimateSize(0); 
       if (size >= mCacheConf.getMaxSize() * BACKING_RATIO) {
         Set<byte[]> ids = mBackingStore.numInodes(0, mCacheConf.getEvictBatchSize() * BACKING_RATIO, true);
         LOG.info(" === trying remove {} backing store indoes", ids.size());
-        for (byte[] bytes: ids) {
-          remove(Longs.fromByteArray(bytes));
+        for (byte[] key: ids) {
+          remove(Longs.fromByteArray(key));
         }
         if (size - ids.size() >= mCacheConf.getLowWaterMark()  * BACKING_RATIO) return false;
       }
@@ -421,6 +426,25 @@ public final class CachingInodeStore implements InodeStore, Closeable {
         mBackingStore.removeChild(key.getId(), key.getName());
       }
     }
+
+    @Override
+    protected boolean tickle() {   // SM return: under watermark?
+      long size = mBackingStore.estimateSize(1); 
+      if (size >= mCacheConf.getMaxSize() * BACKING_RATIO) {
+        Set<byte[]> ids = mBackingStore.numInodes(1, mCacheConf.getEvictBatchSize() * BACKING_RATIO, true);
+        LOG.info(" === trying remove {} backing store edges", ids.size());
+        for (byte[] key: ids) {
+          byte[] id = new byte[Longs.BYTES];
+          byte[] name = new byte[key.length - Longs.BYTES];
+          System.arraycopy(key, 0, id, 0, Longs.BYTES);
+          System.arraycopy(key, Longs.BYTES, name, 0, key.length - Longs.BYTES);
+          remove(new Edge(Longs.fromByteArray(id), new String(name)));
+        }
+        if (size - ids.size() >= mCacheConf.getLowWaterMark()  * BACKING_RATIO) return false;
+      }
+      return true;
+    }
+
 
     @Override
     protected void flushEntries(List<Entry> entries) {
@@ -583,14 +607,10 @@ public final class CachingInodeStore implements InodeStore, Closeable {
     private Map<Long, ListingCacheEntry> mMap = new ConcurrentHashMap<>();
     private Iterator<Map.Entry<Long, ListingCacheEntry>> mEvictionHead = mMap.entrySet().iterator();
 
-    // SM - avoid big dir flush out cache
-    private final int mMaxDirEntries;
-
     private ListingCache(CacheConfiguration conf) {
       mMaxSize = conf.getMaxSize();
       mHighWaterMark = conf.getHighWaterMark();
       mLowWaterMark = conf.getLowWaterMark();
-      mMaxDirEntries = mMaxSize / 100 * 10;  // SM
       MetricsSystem.registerGaugeIfAbsent(MetricsSystem.getMetricName("listing-cache-size"),
           () -> mWeight.get());
     }
@@ -656,6 +676,15 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       return Optional.empty();
     }
 
+    public void bigDir(Long inodeId) { // SM
+      mMap.computeIfPresent(inodeId, (k, v) -> {
+        if (v.mChildren != null) {
+          mWeight.addAndGet(-weight(v));
+        }
+        return null;
+      });
+    }
+
     /**
      * Gets all children of an inode, falling back on the edge cache if the listing isn't cached.
      *
@@ -693,7 +722,7 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       mMap.computeIfPresent(inodeId, (key, value) -> {
         // Perform the update inside computeIfPresent to prevent concurrent modification to the
         // cache entry.
-        if (!entry.mModified && listing.size() < mMaxDirEntries) {    // SM
+        if (!entry.mModified) {
           entry.mChildren = new ConcurrentHashMap<>(listing);
           mWeight.addAndGet(weight(entry));
           return entry;
@@ -760,14 +789,6 @@ public final class CachingInodeStore implements InodeStore, Closeable {
       private volatile Map<String, Long> mChildren = null;
 
       public void addChild(String name, Long id) {
-        // SM
-        if (mChildren != null && mChildren.size() >= mMaxDirEntries) {
-          mWeight.addAndGet(-mChildren.size());
-          mModified = true;
-          mChildren = null;
-          return;
-        }
-
         if (mChildren != null && mChildren.put(name, id) == null) {
           mWeight.incrementAndGet();
         }

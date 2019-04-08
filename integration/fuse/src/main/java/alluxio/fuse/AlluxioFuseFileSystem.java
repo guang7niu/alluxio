@@ -57,6 +57,7 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.concurrent.TimeoutException;
 import java.util.Map;
 
@@ -101,6 +102,8 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
   private static final String mSeed = ".tmp.ava.alluxiosc.tmp";
   private static final String mCacheSeed = ".tmp.cache.tmp.ava.alluxiosc.tmp";
   private static final int SHORT_CIRCUIT_SIZE = 512;
+  private static final String CUR_MARKER = "@marker current: ";
+  private static final String RESET_MARKER = "@marker reset: ls @";
 
   class OpenFileEntry2 extends OpenFileEntry {
     private FuseFileInfo mFI;
@@ -413,16 +416,23 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
     }
     //final AlluxioURI turi = mPathResolverCache.getUnchecked(path);
     AlluxioURI turi = MetaCache.getURI(path);
+    URIStatus status = null;
     LOG.trace("getattr({}) [Alluxio: {}]", path, turi);
     int idx = path.lastIndexOf("/@");   // SM
     if (idx >= 0) {
+      String f = path.substring(idx + 2);
+      if (f.startsWith(CUR_MARKER) || f.startsWith(RESET_MARKER)) {
+        status = MetaCache.file2Status(f);
+      } else {
         path = path.substring(0, idx);
         if (path.equals("")) path = "/";
         turi = MetaCache.getURI(path);
+      }
     }
 
     try {
-      URIStatus status = mFileSystem.getStatus(turi);
+      //URIStatus status = mFileSystem.getStatus(turi); // SM
+      if (status == null) status = mFileSystem.getStatus(turi);
       if (!status.isCompleted()) {
         // Always block waiting for file to be completed except when the file is writing
         // We do not want to block the writing process
@@ -685,16 +695,16 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
   }
 
   // SM
-  private void doInvalidate(String path, AlluxioURI uri) {
+  private void doInvalidate(AlluxioURI uri) {
     try {
       final URIStatus status = mFileSystem.getStatus(uri);
       if (status.isFolder()) {
-        MetaCache.invalidatePrefix(path);
+        MetaCache.invalidatePrefix(uri.getPath());
       } else {
-        MetaCache.invalidate(path);
+        MetaCache.invalidate(uri.getPath());
       }
     } catch (Exception e) {
-      LOG.error("==== error doInvalidate getStatus {} ", path);
+      LOG.error("==== error doInvalidate getStatus {} ", uri);
     }
   }
 
@@ -720,8 +730,8 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
   /**
    * Repair the inconsistent path by delete it in alluxio only, and refresh master metadata
    */
-  private void doRefresh(String path, AlluxioURI uri) throws IOException {
-      doInvalidate(path, uri);
+  private void doRefresh(AlluxioURI uri) throws IOException {
+      doInvalidate(uri);
 
       List<AlluxioURI> inconsistentUris = checkConsistency(uri, 
           CheckConsistencyPOptions.getDefaultInstance());
@@ -754,6 +764,38 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
       }
   }
 
+  class LsOption {
+    public String mMarker;
+    boolean mQuick;
+    public LsOption() {
+      mMarker = null;
+      mQuick = true;
+    }
+    public LsOption quick(boolean q) {
+      mQuick = q;
+      return this;
+    }
+    public boolean quick() {
+      return mQuick;
+    }
+    public LsOption marker(String m) {
+      mMarker = m;
+      return this;
+    }
+    public String marker() {
+      return mMarker;
+    }
+  }
+
+  private ConcurrentHashMap<String, LsOption> mLsOptions = new ConcurrentHashMap<>();
+  private void addLsOption(String path, LsOption option) {
+    for (Map.Entry<String, LsOption> entry: mLsOptions.entrySet()) {
+      if (mLsOptions.size() < 1000) break;
+      mLsOptions.remove(entry.getKey());
+    }
+    mLsOptions.put(path, option);
+  }
+
   /**
    * Reads the contents of a directory.
    *
@@ -768,26 +810,74 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
   public int readdir(String path, Pointer buff, FuseFillDir filter,
       @off_t long offset, FuseFileInfo fi) {
     //final AlluxioURI turi = mPathResolverCache.getUnchecked(path);
-    AlluxioURI turi = MetaCache.getURI(path);   // SM
-    ListStatusPOptions options = ListStatusPOptions.getDefaultInstance(); //qiniu
-    LOG.trace("readdir({}) [Alluxio: {}]", path, turi);
-
+    LOG.trace("readdir({})", path);
     try {
+      /*
+       * @l: switch between detail and quick mode
+       * @: unset marker, aka, start from beginning
+       * @{marker}: set marker
+       * @f: consistency check
+       */
+      List<URIStatus> ls = new ArrayList<>();
       int idx = path.lastIndexOf("/@");   // SM
       if (idx >= 0) {
-          String dbg_txt = path.substring(idx).replace("/@", "");
-          path = path.substring(0, idx);
-          if (path.equals("")) path = "/";
-          turi = MetaCache.getURI(path);
-          if (dbg_txt.equals("f")) {
-            doRefresh(path, turi);
-            options = ListStatusPOptions.newBuilder().setLoadMetadataType(LoadMetadataPType.ALWAYS).build();
+        String dbg_txt = path.substring(idx).replace("/@", "");
+        path = path.substring(0, idx);
+        if (path.equals("")) path = "/";
+        if (dbg_txt.startsWith("@")) {  // debug
+          MetaCache.debugMetaCache(dbg_txt.substring(1));
+          ls.add(MetaCache.file2Status("check debug output in fuse.out"));
+        } else if (dbg_txt.length() == 0) {  // unset marker
+          LsOption option = mLsOptions.get(path);
+          if (option != null && option.mMarker != null) {
+            ls.add(MetaCache.file2Status("unset marker " + option.mMarker));
+            option.mMarker = null;
           } else {
-            MetaCache.debugMetaCache(dbg_txt);
+            ls.add(MetaCache.file2Status("unset marker"));
           }
+        } else if (dbg_txt.equals("f")) {
+          doRefresh(MetaCache.getURI(path));
+          ls.add(MetaCache.file2Status("Done check consistency"));
+        } else if (dbg_txt.equals("l")) {
+          LsOption option = mLsOptions.get(path);
+          if (option == null) {
+            option = new LsOption().quick(false);
+            addLsOption(path, option);
+          } else {
+            option.quick(!option.quick());
+          }
+          if (option.quick()) {
+            ls.add(MetaCache.file2Status("ls fast mode."));
+          } else {
+            ls.add(MetaCache.file2Status("ls detail mode."));
+            MetaCache.invalidatePrefix(path);
+          }
+        } else if (dbg_txt.length() > 0) {
+          LsOption option = mLsOptions.get(path);
+          if (option == null) {
+            option = new LsOption();
+            addLsOption(path, option);
+          }
+          option.marker(dbg_txt);
+          ls.add(MetaCache.file2Status("set marker " + dbg_txt));
+        } else {
+          ls.add(MetaCache.file2Status("invalid option."));
+        }
+      } else { // SM
+        ListStatusPOptions.Builder builder = ListStatusPOptions.newBuilder().setLoadMetadataType(LoadMetadataPType.ALWAYS);
+        LsOption lop = mLsOptions.get(path);
+        URIStatus curMarker = null, resetMarker = null;
+        if (lop != null && lop.marker() != null) {
+          builder.setMarker(lop.marker());
+          curMarker = MetaCache.file2Status(CUR_MARKER + lop.marker());
+          resetMarker = MetaCache.file2Status(RESET_MARKER);
+        }
+        if (lop != null && !lop.quick()) builder.setLoadMetadataType(LoadMetadataPType.ALWAYS);
+        ls = mFileSystem.listStatus(MetaCache.getURI(path), builder.build());
+        if (curMarker != null) ls.add(curMarker);
+        if (resetMarker != null) ls.add(resetMarker);
       }
 
-      final List<URIStatus> ls = mFileSystem.listStatus(turi, options); //qiniu
       // standard . and .. entries
       filter.apply(buff, ".", null, 0);
       filter.apply(buff, "..", null, 0);
@@ -873,8 +963,8 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
         LOG.error("File {} already exists, please delete the destination file first", newPath);
         return -ErrorCodes.EEXIST();
       }
-      doInvalidate(oldPath, oldUri);
-      doInvalidate(newPath, newUri);
+      doInvalidate(oldUri);
+      doInvalidate(newUri);
       mFileSystem.rename(oldUri, newUri);
     } catch (FileDoesNotExistException e) {
       LOG.debug("Failed to rename {} to {}, file {} does not exist", oldPath, newPath, oldPath);
@@ -1057,7 +1147,7 @@ public final class AlluxioFuseFileSystem extends FuseStubFS {
     final AlluxioURI turi = MetaCache.getURI(path);   // SM
 
     try {
-      doInvalidate(path, turi);   // SM
+      doInvalidate(turi);   // SM
       mFileSystem.delete(turi);
     } catch (FileDoesNotExistException | InvalidPathException e) {
       LOG.debug("Failed to remove {}, file does not exist or is invalid", path);

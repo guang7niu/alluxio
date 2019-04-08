@@ -188,6 +188,10 @@ public class URIStatus {
     return owner;
   }
 
+  public FileInfo getFileInfo() {   // SM
+    return mInfo;
+  }
+
   /**
    * @return the maximum number of replicas of the entity referenced by this uri, mutable
    */

@@ -173,6 +173,8 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
      */
     @Nullable
     ObjectListingChunk getNextChunk() throws IOException;
+
+    default String getMarker() { return ""; }   // SM
   }
 
   /**
@@ -764,6 +766,12 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
   protected abstract ObjectListingChunk getObjectListingChunk(String key, boolean recursive)
       throws IOException;
 
+  @Nullable
+  protected ObjectListingChunk getObjectListingChunk(String key, ListOptions options)    // SM
+      throws IOException {
+    return null;
+  }
+
   /**
    * Gets a (partial) object listing for the given path.
    *
@@ -777,6 +785,24 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
     // Check if anything begins with <folder_path>/
     String dir = stripPrefixIfPresent(path);
     ObjectListingChunk objs = getObjectListingChunk(dir, recursive);
+    // If there are, this is a folder and we can create the necessary metadata
+    if (objs != null && ((objs.getObjectStatuses() != null && objs.getObjectStatuses().length > 0)
+        || (objs.getCommonPrefixes() != null && objs.getCommonPrefixes().length > 0))) {
+      // If the breadcrumb exists, this is a no-op
+      if (!mUfsConf.isReadOnly()) {
+        mkdirsInternal(dir);
+      }
+      return objs;
+    }
+    return null;
+  }
+
+  @Nullable   // SM keep same as above
+  protected ObjectListingChunk getObjectListingChunkForPath(String path, ListOptions options) 
+      throws IOException {
+    // Check if anything begins with <folder_path>/
+    String dir = stripPrefixIfPresent(path);
+    ObjectListingChunk objs = getObjectListingChunk(dir, options);
     // If there are, this is a folder and we can create the necessary metadata
     if (objs != null && ((objs.getObjectStatuses() != null && objs.getObjectStatuses().length > 0)
         || (objs.getCommonPrefixes() != null && objs.getCommonPrefixes().length > 0))) {
@@ -806,7 +832,7 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
    */
   @Nullable
   protected UfsStatus[] listInternal(String path, ListOptions options) throws IOException {
-    ObjectListingChunk chunk = getObjectListingChunkForPath(path, options.isRecursive());
+    ObjectListingChunk chunk = getObjectListingChunkForPath(path, options);   // SM
     if (chunk == null) {
       String keyAsFolder = convertToFolderName(stripPrefixIfPresent(path));
       if (getObjectStatus(keyAsFolder) != null) {
@@ -895,6 +921,16 @@ public abstract class ObjectUnderFileSystem extends BaseUnderFileSystem {
           }
         }
       }
+
+      if (options.getMaxSize() > 0 && (children.size() >= options.getMaxSize()
+            || chunk.getObjectStatuses().length >= options.getMaxSize())) {     // SM
+        LOG.debug("SMLS: reaching max entry {} for {}", options.getMaxSize(), path);
+        if (chunk.getMarker() != null && chunk.getMarker().length() > 0) {
+          options.setOutMarker(chunk.getMarker());
+        }
+        break;
+      }
+
       chunk = chunk.getNextChunk();
     }
     UfsStatus[] ret = new UfsStatus[children.size()];

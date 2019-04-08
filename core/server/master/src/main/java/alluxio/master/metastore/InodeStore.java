@@ -245,4 +245,7 @@ public interface InodeStore extends ReadOnlyInodeStore {
    * Factory for creating inode stores.
    */
   interface Factory extends Function<InodeStoreArgs, InodeStore> {}
+
+  // SM
+  default void bigDir(Long inodeId) {}
 }
